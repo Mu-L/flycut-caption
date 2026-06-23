@@ -54,6 +54,9 @@
     "build:demo": "vite build --mode demo",
     "lint": "eslint .",
     "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "prepublishOnly": "npm run lint && npm run build:lib",
     "publish:npm": "npm publish"
   },
@@ -96,6 +99,7 @@
   "devDependencies": {
     "@eslint/js": "^9.33.0",
     "@tailwindcss/vite": "^4.1.13",
+    "@tauri-apps/cli": "^2.11.3",
     "@types/i18next": "^13.0.0",
     "@types/node": "^24.3.1",
     "@types/react": "^19.1.10",

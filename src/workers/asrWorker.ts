@@ -1,18 +1,10 @@
 // ASR Worker - 基于 Whisper 的语音识别处理
 // 生成句子级别时间戳，适合字幕编辑
 
-import { pipeline, env } from '@huggingface/transformers';
+import { pipeline } from '@huggingface/transformers';
 import type { ASRProgress, SubtitleTranscript } from '../types/subtitle';
 import { isValidLanguageCode } from '../constants/languages';
-
-// 配置模型加载路径 - 使用 OSS
-// OSS 配置：fly-cut bucket, oss-cn-hangzhou.aliyuncs.com
-const OSS_BASE_URL = 'https://fly-cut.oss-cn-hangzhou.aliyuncs.com';
-const OSS_MODEL_PATH = 'models/onnx-community/whisper-small';
-
-// 配置 transformers.js 环境以从 OSS 加载模型
-const modelBaseURL = `${OSS_BASE_URL}/${OSS_MODEL_PATH}`;
-console.log('ASR配置OSS模型路径:', modelBaseURL);
+import type { TransformersASREngineConfig } from '../services/asrEngines/TransformersASREngine';
 
 // transformers.js 不支持直接将 HTTP URL 作为模型 ID
 // 我们需要拦截文件加载请求，将 Hugging Face Hub 的 URL 重定向到 OSS
@@ -21,61 +13,32 @@ console.log('ASR配置OSS模型路径:', modelBaseURL);
 // 保存原始的 fetch 函数
 const originalFetch = globalThis.fetch;
 
-console.log('🔧 设置 fetch 拦截器，OSS 路径:', modelBaseURL);
+let activeConfig: TransformersASREngineConfig | null = null;
+
+function resolveModelFileUrl(url: string): string | null {
+  if (!activeConfig?.modelBaseUrl) return null;
+  if (!url.includes('huggingface.co') || !url.includes(activeConfig.modelId)) return null;
+
+  const escapedModelId = activeConfig.modelId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = url.match(new RegExp(`${escapedModelId}/(?:resolve|raw)/[^/]+/(.+)$`));
+  const filePath = match?.[1] || url.match(new RegExp(`${escapedModelId}/(.+)$`))?.[1]?.replace(/^(resolve|raw)\/[^/]+\//, '');
+
+  return filePath ? `${activeConfig.modelBaseUrl}/${filePath}` : null;
+}
 
 // 重写 fetch 函数以从 OSS 加载文件
 globalThis.fetch = async function(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-  
-  // 检查是否是 Hugging Face Hub 的模型文件请求
-  if (url && url.includes('huggingface.co') && url.includes('onnx-community/whisper-small')) {
-    console.log('🔍 检测到 Hugging Face 请求:', url);
-    
-    // 匹配 Hugging Face Hub 的 URL 格式：
-    // https://huggingface.co/onnx-community/whisper-small/resolve/main/tokenizer_config.json
-    // 或
-    // https://huggingface.co/onnx-community/whisper-small/raw/main/tokenizer_config.json
-    const match = url.match(/onnx-community\/whisper-small\/(?:resolve|raw)\/[^/]+\/(.+)$/);
-    if (match) {
-      const filePath = match[1];
-      const ossUrl = `${modelBaseURL}/${filePath}`;
-      console.log(`🔄 重定向到 OSS: ${filePath} -> ${ossUrl}`);
-      try {
-        return await originalFetch(ossUrl, init);
-      } catch (error) {
-        console.error(`❌ OSS 请求失败: ${ossUrl}`, error);
-        throw error;
-      }
-    }
-    
-    // 也尝试匹配其他可能的格式
-    const match2 = url.match(/onnx-community\/whisper-small\/(.+)$/);
-    if (match2) {
-      const filePath = match2[1];
-      // 跳过 resolve/main/ 或 raw/main/ 等路径段
-      const cleanPath = filePath.replace(/^(resolve|raw)\/[^/]+\//, '');
-      const ossUrl = `${modelBaseURL}/${cleanPath}`;
-      console.log(`🔄 重定向到 OSS (格式2): ${cleanPath} -> ${ossUrl}`);
-      try {
-        return await originalFetch(ossUrl, init);
-      } catch (error) {
-        console.error(`❌ OSS 请求失败: ${ossUrl}`, error);
-        throw error;
-      }
-    }
-    
-    console.warn('⚠️ 无法匹配 URL 格式:', url);
+
+  const modelFileUrl = url ? resolveModelFileUrl(url) : null;
+  if (modelFileUrl) {
+    console.log(`🔄 重定向模型文件: ${url} -> ${modelFileUrl}`);
+    return originalFetch(modelFileUrl, init);
   }
-  
+
   // 其他请求使用原始 fetch
   return originalFetch(input, init);
 };
-
-// 获取模型 ID（使用原始的 Hugging Face 模型 ID）
-function getModelId(): string {
-  // 使用原始的模型 ID，fetch 拦截器会将请求重定向到 OSS
-  return 'onnx-community/whisper-small';
-}
 
 const PER_DEVICE_CONFIG = {
   webgpu: {
@@ -95,17 +58,27 @@ const PER_DEVICE_CONFIG = {
  * ASR 管道单例模式 - 句子级别时间戳版本
  */
 class PipelineSingleton {
-  static model_id = getModelId();
   static instance: Awaited<ReturnType<typeof pipeline>> | null = null;
+  static cacheKey = '';
 
-  static async getInstance(progress_callback?: (progress: unknown) => void, device: 'webgpu' | 'wasm' = 'webgpu') {
+  static async getInstance(config: TransformersASREngineConfig, progress_callback?: (progress: unknown) => void) {
+    const cacheKey = JSON.stringify({
+      modelId: config.modelId,
+      modelBaseUrl: config.modelBaseUrl,
+      device: config.device,
+    });
+
+    if (this.cacheKey !== cacheKey) {
+      this.instance = null;
+      this.cacheKey = cacheKey;
+    }
+
     if (!this.instance) {
-      console.log('ASR创建新的管道实例:', { device, model_id: this.model_id });
-      
-      // 如果使用 OSS URL，Transformers.js 会直接从该 URL 加载模型文件
-      // 确保 OSS Bucket 已配置 CORS，允许跨域访问
-      this.instance = pipeline('automatic-speech-recognition', this.model_id, {
-        ...PER_DEVICE_CONFIG[device],
+      activeConfig = config;
+      console.log('ASR创建新的管道实例:', { device: config.device, modelId: config.modelId, modelBaseUrl: config.modelBaseUrl });
+
+      this.instance = pipeline('automatic-speech-recognition', config.modelId, {
+        ...PER_DEVICE_CONFIG[config.device],
         progress_callback,
       });
     }
@@ -116,31 +89,32 @@ class PipelineSingleton {
 /**
  * 加载 ASR 模型
  */
-async function load({ device }: { device: 'webgpu' | 'wasm' }) {
-  console.log('ASR Worker开始加载模型:', device);
+async function load({ config }: { config: TransformersASREngineConfig }) {
+  activeConfig = config;
+  console.log('ASR Worker开始加载模型:', config);
   
   self.postMessage({
     status: 'loading',
-    data: `正在加载模型 (${device})...`,
+    data: `正在加载模型 (${config.device})...`,
   } satisfies ASRProgress);
 
   try {
     // 加载管道并保存以供将来使用
-    const transcriber = await PipelineSingleton.getInstance((progress) => {
+    const transcriber = await PipelineSingleton.getInstance(config, (progress) => {
       // 添加进度回调以跟踪模型加载
       console.log('ASR模型加载进度:', progress);
       self.postMessage(progress);
-    }, device);
+    });
 
     // WebGPU 需要预热
-    if (device === 'webgpu') {
+    if (config.device === 'webgpu') {
       self.postMessage({
         status: 'loading',
         data: '正在编译着色器并预热模型...',
       } satisfies ASRProgress);
 
       await transcriber(new Float32Array(16_000), {
-        language: 'en',
+        language: config.language,
       });
     }
 
@@ -163,7 +137,11 @@ async function run({ audio, language }: { audio: Float32Array; language: string 
   console.log('ASR Worker开始识别:', { audioLength: audio?.length, language });
   
   try {
-    const transcriber = await PipelineSingleton.getInstance();
+    if (!activeConfig) {
+      throw new Error('模型配置缺失，请先加载模型');
+    }
+
+    const transcriber = await PipelineSingleton.getInstance(activeConfig);
     const start = performance.now();
 
     self.postMessage({

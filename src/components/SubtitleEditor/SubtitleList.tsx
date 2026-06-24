@@ -4,10 +4,11 @@ import { useMemo, useState, type RefObject } from 'react';
 import { cn } from '@/lib/utils';
 import { useHistoryStore, useChunks, useHistoryText, useHistoryLanguage, useHistoryDuration, useCanUndo, useCanRedo, useUndo, useRedo } from '@/stores/historyStore';
 import { useAppStore } from '@/stores/appStore';
-import { formatTime, isTimeInRange } from '@/utils/timeUtils';
-import { FileText, Trash2, RotateCcw, Check, Undo, Redo } from 'lucide-react';
+import { isTimeInRange } from '@/utils/timeUtils';
+import { FileText, Trash2, RotateCcw, Undo, Redo, ArrowLeftRight, Languages } from 'lucide-react';
 import { SubtitleItem } from './SubtitleItem';
 import type { EnhancedVideoPlayerRef } from '@/components/VideoPlayer/EnhancedVideoPlayer';
+import { useTranslation } from '@/contexts/LocaleProvider';
 
 interface SubtitleListProps {
   className?: string;
@@ -22,6 +23,7 @@ export function SubtitleList({
   className,
   videoPlayerRef
 }: SubtitleListProps) {
+  const { t } = useTranslation();
   const chunks = useChunks();
   const text = useHistoryText();
   const language = useHistoryLanguage();
@@ -33,7 +35,6 @@ export function SubtitleList({
   const undo = useUndo();
   const redo = useRedo();
   
-  // 在组件层用 useMemo 创建 transcript 对象，避免无限循环
   const transcript = useMemo(() => ({
     text,
     chunks,
@@ -41,53 +42,44 @@ export function SubtitleList({
     duration,
   }), [text, chunks, language, duration]);
   
-  // 在组件层用 useMemo 做过滤，避免无限循环
   const activeChunks = useMemo(
     () => chunks.filter(c => !c.deleted),
     [chunks]
   );
+  
   const currentTime = useAppStore(state => state.currentTime);
+  const displayMode = useAppStore(state => state.display);
+  const setDisplayMode = useAppStore(state => state.setDisplay);
+  
   const deleteSelected = useHistoryStore(state => state.deleteSelected);
   const restoreSelected = useHistoryStore(state => state.restoreSelected);
-  // const toggleDeleted = useHistoryStore(state => state.toggleDeleted);
   
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // 创建 seekTo 函数，使用 videoPlayerRef
   const seekTo = (time: number) => {
     if (videoPlayerRef?.current) {
       videoPlayerRef.current.seekTo(time);
     }
   };
 
-  // 获取当前高亮的字幕片段
   const currentChunk = useMemo(() => {
     return transcript.chunks.find(chunk =>
       isTimeInRange(currentTime, chunk.timestamp)
     ) || null;
   }, [transcript.chunks, currentTime]);
 
-  // 计算统计信息
   const statistics = useMemo(() => {
     const deletedChunks = transcript.chunks.filter(chunk => chunk.deleted);
     const activeCount = activeChunks.length;
     const deletedCount = deletedChunks.length;
     const totalCount = transcript.chunks.length;
 
-    const deletedDuration = deletedChunks.reduce((sum, chunk) => 
-      sum + (chunk.timestamp[1] - chunk.timestamp[0]), 0);
-    const activeDuration = activeChunks.reduce((sum, chunk) => 
-      sum + (chunk.timestamp[1] - chunk.timestamp[0]), 0);
-
     return {
       totalCount,
       activeCount,
       deletedCount,
-      activeDuration,
-      deletedDuration,
     };
   }, [transcript.chunks, activeChunks]);
-
 
   const handleToggleSelection = (chunkId: string) => {
     const newSelected = new Set(selectedIds);
@@ -128,113 +120,157 @@ export function SubtitleList({
 
   if (!transcript.chunks || transcript.chunks.length === 0) {
     return (
-      <div className={cn('flex flex-col items-center justify-center p-8', className)}>
-        <FileText className="h-12 w-12 text-muted-foreground mb-4" />
-        <p className="text-muted-foreground text-center">
-          还没有字幕数据
+      <div className={cn('flex flex-col items-center justify-center p-8 bg-aimu-panel h-full', className)}>
+        <FileText className="h-12 w-12 text-aimu-text-muted mb-4" />
+        <p className="text-aimu-text-muted text-center">
+          {t('components.fileUpload.noFileSelected')}
           <br />
-          请先上传视频并生成字幕
+          {t('components.fileUpload.dragDropText')}
         </p>
       </div>
     );
   }
 
   return (
-    <div className={cn('flex flex-col space-y-4 h-full', className)}>
-      {/* 操作按钮 */}
-      <div className="flex flex-wrap gap-2 p-2 rounded-lg bg-card">
-        {/* 历史操作按钮组 */}
-        <div className="flex items-center space-x-1 pr-2 border-r border-border">
+    <div className={cn('flex flex-col h-full bg-aimu-panel', className)}>
+      {/* Panel Header (~40px tall, border-bottom) */}
+      <div className="flex items-center justify-between h-10 px-3 border-b border-aimu-border shrink-0">
+        {/* LEFT: Display mode segmented control */}
+        <div className="flex items-center bg-aimu-input rounded p-0.5">
+          <button
+            onClick={() => setDisplayMode('Bilingual')}
+            className={cn(
+              'px-3 py-1 text-xs rounded transition-colors',
+              displayMode === 'Bilingual' 
+                ? 'bg-aimu-purple text-white' 
+                : 'text-aimu-text-secondary hover:text-aimu-text-primary'
+            )}
+          >
+            {t('components.workstation.displayBilingual')}
+          </button>
+          <button
+            onClick={() => setDisplayMode('Main')}
+            className={cn(
+              'px-3 py-1 text-xs rounded transition-colors',
+              displayMode === 'Main' 
+                ? 'bg-aimu-purple text-white' 
+                : 'text-aimu-text-secondary hover:text-aimu-text-primary'
+            )}
+          >
+            {t('components.workstation.displayMain')}
+          </button>
+          <button
+            onClick={() => setDisplayMode('Second')}
+            className={cn(
+              'px-3 py-1 text-xs rounded transition-colors',
+              displayMode === 'Second' 
+                ? 'bg-aimu-purple text-white' 
+                : 'text-aimu-text-secondary hover:text-aimu-text-primary'
+            )}
+          >
+            {t('components.workstation.displaySecond')}
+          </button>
+        </div>
+
+        {/* CENTER: Swap button */}
+        <button className="p-1.5 text-aimu-text-muted hover:text-aimu-text-primary transition-colors rounded" title={t('components.workstation.swapTitle')}>
+          <ArrowLeftRight className="w-4 h-4" />
+        </button>
+
+        {/* RIGHT: Translation language dropdown + Start button */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 px-2 py-1 border border-aimu-border rounded text-xs text-aimu-text-secondary cursor-not-allowed opacity-70">
+            <Languages className="w-3.5 h-3.5" />
+            <span>{t('components.languageSelector.selectLanguage')}</span>
+          </div>
+          <button disabled className="px-3 py-1 text-xs bg-aimu-red-bg text-aimu-coral rounded opacity-50 cursor-not-allowed font-medium">
+            {t('components.workstation.start')}
+          </button>
+        </div>
+      </div>
+
+      {/* Subtitle List (scrollable) */}
+      <div className="flex-1 overflow-y-auto">
+        {transcript.chunks.map((chunk, index) => {
+          const isActive = !chunk.deleted;
+          const isCurrent = currentChunk?.id === chunk.id;
+          const isSelected = selectedIds.has(chunk.id);
+          
+          return (
+            <SubtitleItem
+              key={chunk.id}
+              chunk={chunk}
+              index={index}
+              isActive={isActive}
+              isCurrent={isCurrent}
+              isSelected={isSelected}
+              onToggleSelection={handleToggleSelection}
+              onSeekTo={seekTo}
+            />
+          );
+        })}
+      </div>
+
+      {/* Status/toolbar area at the bottom */}
+      <div className="flex items-center justify-between p-2 border-t border-aimu-border bg-aimu-panel shrink-0">
+        <div className="flex items-center gap-1">
           <button
             onClick={undo}
             disabled={!canUndo}
-            className="flex items-center space-x-1 px-2.5 py-1.5 text-xs border rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            title="撤销上一步操作"
+            className="p-1.5 text-aimu-text-muted hover:text-aimu-text-primary disabled:opacity-30 transition-colors rounded"
+            title={t('components.subtitleEditor.undoDelete')}
           >
-            <Undo className="h-3 w-3" />
-            <span className="hidden sm:inline">撤销</span>
+            <Undo className="w-4 h-4" />
           </button>
-          
           <button
             onClick={redo}
             disabled={!canRedo}
-            className="flex items-center space-x-1 px-2.5 py-1.5 text-xs border rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            title="重做上一步操作"
+            className="p-1.5 text-aimu-text-muted hover:text-aimu-text-primary disabled:opacity-30 transition-colors rounded"
+            title={t('components.subtitleEditor.redoDelete')}
           >
-            <Redo className="h-3 w-3" />
-            <span className="hidden sm:inline">重做</span>
-          </button>
-        </div>
-
-        {/* 选择操作按钮组 */}
-        <div className="flex items-center space-x-1">
-          <button
-            onClick={handleSelectAll}
-            className="flex items-center space-x-1 px-2.5 py-1.5 text-xs border rounded hover:bg-muted transition-colors"
-          >
-            <Check className="h-3 w-3" />
-            <span className="hidden sm:inline">全选</span>
+            <Redo className="w-4 h-4" />
           </button>
           
+          <div className="w-px h-4 bg-aimu-border mx-1"></div>
+          
+          <button
+            onClick={handleSelectAll}
+            className="px-2 py-1 text-xs text-aimu-text-secondary hover:text-aimu-text-primary transition-colors"
+          >
+            {t('components.subtitleEditor.selectAll')}
+          </button>
           <button
             onClick={handleClearSelection}
-            className="flex items-center space-x-1 px-2.5 py-1.5 text-xs border rounded hover:bg-muted transition-colors"
+            className="px-2 py-1 text-xs text-aimu-text-secondary hover:text-aimu-text-primary transition-colors"
           >
-            <RotateCcw className="h-3 w-3" />
-            <span className="hidden sm:inline">清除</span>
+            {t('components.subtitleEditor.clearSelection')}
           </button>
         </div>
-        
-        <button
-          onClick={handleDeleteSelected}
-          disabled={selectedIds.size === 0}
-          className="flex items-center space-x-1 px-2.5 py-1.5 text-xs border rounded hover:bg-red-50 hover:border-red-200 text-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          <Trash2 className="h-3 w-3" />
-          <span>删除选中 ({selectedIds.size})</span>
-        </button>
 
-        {statistics.deletedCount > 0 && (
+        <div className="flex items-center gap-2">
+          <div className="text-[11px] text-aimu-text-muted font-mono mr-2">
+            {t('components.workstation.total')}: {statistics.totalCount} | {t('components.workstation.active')}: {statistics.activeCount}
+          </div>
+          
           <button
-            onClick={handleRestoreDeleted}
-            className="flex items-center space-x-1 px-2.5 py-1.5 text-xs border rounded hover:bg-green-50 hover:border-green-200 text-green-600 transition-colors"
+            onClick={handleDeleteSelected}
+            disabled={selectedIds.size === 0}
+            className="flex items-center gap-1 px-2 py-1 text-xs text-aimu-coral hover:bg-aimu-red-bg rounded disabled:opacity-30 transition-colors"
           >
-            <RotateCcw className="h-3 w-3" />
-            <span>恢复删除 ({statistics.deletedCount})</span>
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>{t('components.subtitleEditor.deleteSelected')} ({selectedIds.size})</span>
           </button>
-        )}
-      </div>
 
-      {/* 字幕列表 */}
-      <div 
-        className="flex-1 rounded-lg overflow-hidden"
-      >
-        <div className="overflow-y-auto space-y-2 p-2 h-full">
-          {transcript.chunks.map((chunk, index) => {
-            const isActive = !chunk.deleted;
-            const isCurrent = currentChunk?.id === chunk.id;
-            const isSelected = selectedIds.has(chunk.id);
-            
-            return (
-              <SubtitleItem
-                key={chunk.id}
-                chunk={chunk}
-                index={index}
-                isActive={isActive}
-                isCurrent={isCurrent}
-                isSelected={isSelected}
-                onToggleSelection={handleToggleSelection}
-                onSeekTo={seekTo}
-              />
-            );
-          })}
+          {statistics.deletedCount > 0 && (
+            <button
+              onClick={handleRestoreDeleted}
+              className="flex items-center gap-1 px-2 py-1 text-xs text-green-500 hover:bg-green-500/10 rounded transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>{t('components.workstation.restore')} ({statistics.deletedCount})</span>
+            </button>
+          )}
         </div>
-      </div>
-
-      {/* 底部统计 */}
-      <div className="text-xs text-muted-foreground text-center p-2 border-t">
-        预计保留时长: {formatTime(statistics.activeDuration)} / 
-        删除时长: {formatTime(statistics.deletedDuration)}
       </div>
     </div>
   );

@@ -32,6 +32,11 @@ export interface AppState {
   // 设置
   language: string
   deviceType: 'webgpu' | 'wasm'
+
+  // Aimu 风格设置
+  shadow: 'N' | 'S' | 'M' | 'L'
+  font: string
+  display: 'Bilingual' | 'Main' | 'Second'
 }
 
 // 应用动作接口
@@ -40,7 +45,7 @@ export interface AppActions {
   setStage: (stage: AppState['stage']) => void
   
   // 视频管理
-  setVideoFile: (videoFile: VideoFile) => void
+  setVideoFile: (videoFile: VideoFile | null) => void
   setVideoPlayerState: (playerState: Partial<VideoPlayerState>) => void
   setVideoProcessingProgress: (progress: VideoProcessingProgress) => void
   setVideoProcessorConfig: (config: Partial<VideoProcessorConfig>) => void
@@ -56,6 +61,11 @@ export interface AppActions {
   // 设置管理
   setLanguage: (language: string) => void
   setDeviceType: (deviceType: 'webgpu' | 'wasm') => void
+
+  // Aimu 风格设置管理
+  setShadow: (shadow: AppState['shadow']) => void
+  setFont: (font: AppState['font']) => void
+  setDisplay: (display: AppState['display']) => void
   
   // 重置
   reset: () => void
@@ -93,6 +103,10 @@ const initialState: AppState = {
   
   language: 'en',
   deviceType: 'wasm',
+
+  shadow: 'N',
+  font: 'Source Han Sans CN (Normal)',
+  display: 'Bilingual',
 }
 
 // 创建Store
@@ -113,7 +127,7 @@ export const useAppStore = create<AppState & AppActions>()(
         set((state) => ({
           ...state,
           videoFile,
-          stage: 'transcribe'
+          stage: videoFile ? 'transcribe' : 'upload'
         })),
       
       setVideoPlayerState: (playerState) =>
@@ -190,6 +204,24 @@ export const useAppStore = create<AppState & AppActions>()(
         set((state) => ({
           ...state,
           deviceType
+        })),
+
+      setShadow: (shadow) =>
+        set((state) => ({
+          ...state,
+          shadow
+        })),
+      
+      setFont: (font) =>
+        set((state) => ({
+          ...state,
+          font
+        })),
+      
+      setDisplay: (display) =>
+        set((state) => ({
+          ...state,
+          display
         })),
       
       // 重置

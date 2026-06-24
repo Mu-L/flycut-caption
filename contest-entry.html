@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FlyCut Caption - TRAE AI 创造力大赛创意展示</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7faf9;
+        --ink: #10201b;
+        --muted: #5d6f68;
+        --line: #dce8e3;
+        --panel: #ffffff;
+        --primary: #0f9f6e;
+        --primary-dark: #08734e;
+        --soft: #e8f7f0;
+        --soft-blue: #e9f3ff;
+        --blue: #2563eb;
+        --shadow: 0 24px 80px rgba(16, 32, 27, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(15, 159, 110, 0.18), transparent 34rem),
+          linear-gradient(180deg, #ffffff 0%, var(--bg) 46%, #eef7f3 100%);
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .page {
+        width: min(1120px, calc(100% - 32px));
+        margin: 0 auto;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+        gap: 48px;
+        align-items: center;
+        min-height: 720px;
+        padding: 64px 0 56px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 14px;
+        border: 1px solid rgba(15, 159, 110, 0.22);
+        border-radius: 999px;
+        color: var(--primary-dark);
+        background: rgba(255, 255, 255, 0.78);
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      h1 {
+        margin: 28px 0 18px;
+        font-size: clamp(48px, 7vw, 92px);
+        line-height: 0.96;
+        letter-spacing: 0;
+      }
+
+      .lead {
+        max-width: 640px;
+        margin: 0 0 30px;
+        color: var(--muted);
+        font-size: 20px;
+        line-height: 1.75;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-bottom: 36px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 48px;
+        padding: 0 20px;
+        border-radius: 8px;
+        font-weight: 800;
+        text-decoration: none;
+      }
+
+      .button.primary {
+        color: #ffffff;
+        background: var(--primary);
+        box-shadow: 0 14px 28px rgba(15, 159, 110, 0.25);
+      }
+
+      .button.secondary {
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.84);
+      }
+
+      .meta {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        max-width: 620px;
+      }
+
+      .meta-item {
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .meta-label {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .meta-value {
+        margin-top: 4px;
+        font-weight: 800;
+      }
+
+      .product-panel {
+        position: relative;
+        padding: 24px;
+        border: 1px solid rgba(15, 159, 110, 0.18);
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.78);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+      }
+
+      .app-window {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: var(--panel);
+      }
+
+      .window-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--line);
+        background: #f8fbfa;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #cbd5d1;
+      }
+
+      .mock {
+        display: grid;
+        grid-template-columns: 1fr 0.82fr;
+        min-height: 420px;
+      }
+
+      .subtitle-list {
+        padding: 18px;
+        border-right: 1px solid var(--line);
+      }
+
+      .subtitle-row {
+        margin-bottom: 12px;
+        padding: 13px;
+        border: 1px solid #e5eee9;
+        border-radius: 8px;
+        background: #ffffff;
+      }
+
+      .subtitle-row.cut {
+        border-color: #fed7aa;
+        background: #fff7ed;
+        color: #9a3412;
+        text-decoration: line-through;
+      }
+
+      .time {
+        display: block;
+        margin-bottom: 7px;
+        color: var(--primary-dark);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .preview {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        padding: 18px;
+        background: #f4f8f6;
+      }
+
+      .video-box {
+        position: relative;
+        min-height: 210px;
+        border-radius: 12px;
+        background:
+          linear-gradient(135deg, rgba(16, 32, 27, 0.82), rgba(15, 159, 110, 0.46)),
+          linear-gradient(45deg, #16342a, #0f9f6e);
+      }
+
+      .caption {
+        position: absolute;
+        left: 18px;
+        right: 18px;
+        bottom: 18px;
+        padding: 10px 14px;
+        border-radius: 8px;
+        color: #ffffff;
+        background: rgba(0, 0, 0, 0.56);
+        text-align: center;
+        font-weight: 800;
+      }
+
+      .settings {
+        display: grid;
+        gap: 10px;
+      }
+
+      .setting-bar {
+        height: 10px;
+        border-radius: 999px;
+        background: #dbe7e2;
+      }
+
+      .setting-bar span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--primary);
+      }
+
+      section {
+        padding: 52px 0;
+      }
+
+      .section-head {
+        max-width: 760px;
+        margin-bottom: 26px;
+      }
+
+      h2 {
+        margin: 0 0 12px;
+        font-size: clamp(30px, 4vw, 48px);
+        line-height: 1.1;
+        letter-spacing: 0;
+      }
+
+      .section-head p,
+      .text-block p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 17px;
+        line-height: 1.8;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .card {
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.82);
+      }
+
+      .card h3 {
+        margin: 0 0 10px;
+        font-size: 20px;
+      }
+
+      .card p,
+      .card li {
+        color: var(--muted);
+        line-height: 1.72;
+      }
+
+      .card p {
+        margin: 0;
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 20px;
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .step {
+        min-height: 132px;
+        padding: 18px;
+        border-radius: 8px;
+        background: var(--soft);
+      }
+
+      .step strong {
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .step span {
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 0.9fr 1.1fr;
+        gap: 18px;
+      }
+
+      .tech-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .pill {
+        padding: 9px 12px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #ffffff;
+        color: var(--muted);
+        font-weight: 700;
+      }
+
+      .footer {
+        margin: 50px 0 32px;
+        padding: 28px;
+        border: 1px solid rgba(37, 99, 235, 0.18);
+        border-radius: 12px;
+        background: var(--soft-blue);
+      }
+
+      .footer h2 {
+        font-size: 28px;
+      }
+
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      @media (max-width: 880px) {
+        .hero,
+        .mock,
+        .grid,
+        .flow,
+        .split {
+          grid-template-columns: 1fr;
+        }
+
+        .hero {
+          min-height: 0;
+          padding-top: 36px;
+        }
+
+        .subtitle-list {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .meta {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <div>
+          <span class="eyebrow">TRAE AI 创造力大赛 · 已有项目升级参赛</span>
+          <h1>FlyCut Caption</h1>
+          <p class="lead">
+            这不是一个从零开始的想法，而是对现有 FlyCut Caption 的一次参赛级升级：
+            从单一网页字幕工具，扩展为支持客户端、多模型、多语言字幕、AI 纠错与翻译的创作者工作台。
+          </p>
+
+          <div class="actions">
+            <a class="button secondary" href="https://github.com/x007xyz/flycut-caption" target="_blank" rel="noreferrer">
+              查看 GitHub
+            </a>
+          </div>
+
+          <div class="meta" aria-label="作品信息">
+            <div class="meta-item">
+              <div class="meta-label">作品类型</div>
+              <div class="meta-value">已有项目升级 / AI 字幕工具</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label">本次重点</div>
+              <div class="meta-value">字幕工作流增强</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label">新增能力</div>
+              <div class="meta-value">客户端 + 多模型 + 翻译</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label">技术方向</div>
+              <div class="meta-value">端侧 AI + 多语言字幕处理</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="product-panel" aria-label="产品界面示意">
+          <div class="app-window">
+            <div class="window-top">
+              <span class="dot"></span>
+              <span class="dot"></span>
+              <span class="dot"></span>
+              <strong style="margin-left: 8px">FlyCut Caption Upgrade Plan</strong>
+            </div>
+            <div class="mock">
+              <div class="subtitle-list">
+                <div class="subtitle-row">
+                  <span class="time">00:00:04.200 - 00:00:07.800</span>
+                  原始字幕：这里是一个中文视频片段。
+                </div>
+                <div class="subtitle-row cut">
+                  <span class="time">00:00:08.100 - 00:00:10.400</span>
+                  AI 纠正：自动修复错别字、标点和断句。
+                </div>
+                <div class="subtitle-row">
+                  <span class="time">00:00:11.000 - 00:00:15.600</span>
+                  English: Translate Chinese captions into English.
+                </div>
+                <div class="subtitle-row">
+                  <span class="time">00:00:16.100 - 00:00:19.300</span>
+                  多语言字幕：中文、英文字幕可同时预览与导出。
+                </div>
+              </div>
+              <div class="preview">
+                <div class="video-box">
+                  <div class="caption">中文 / English 双语字幕预览</div>
+                </div>
+                <div class="settings">
+                  <div class="setting-bar"><span style="width: 78%"></span></div>
+                  <div class="setting-bar"><span style="width: 62%"></span></div>
+                  <div class="setting-bar"><span style="width: 88%"></span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>为什么要升级</h2>
+          <p>
+            FlyCut Caption 已经具备基础的字幕生成、编辑和导出能力。本次参赛不再重复展示已有功能，
+            而是围绕真实创作者工作流补齐关键短板：更好的界面、更稳定的客户端形态、更灵活的识别模型、
+            多语言字幕、AI 字幕纠错，以及面向中文内容出海的中英翻译能力。
+          </p>
+        </div>
+        <div class="grid">
+          <article class="card">
+            <h3>从工具到工作台</h3>
+            <p>原项目解决了“生成字幕”这一步，升级后要覆盖校对、翻译、多语言导出和客户端使用。</p>
+          </article>
+          <article class="card">
+            <h3>从网页到客户端</h3>
+            <p>视频字幕任务常涉及大文件和长时间处理，客户端能提供更稳定的本地体验和文件访问能力。</p>
+          </article>
+          <article class="card">
+            <h3>从单语到多语</h3>
+            <p>中文内容需要更方便地生成英文字幕，帮助课程、短视频和产品演示触达更多受众。</p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>本次参赛修改内容</h2>
+          <p>
+            参赛版本将围绕六个方向进行升级，每一项都对应现有项目的明确增强点。
+          </p>
+        </div>
+        <div class="flow">
+          <div class="step">
+            <strong>1. UI 改动</strong>
+            <span>重构字幕编辑、预览、模型和导出入口，让长流程更清晰。</span>
+          </div>
+          <div class="step">
+            <strong>2. 支持客户端</strong>
+            <span>补充桌面客户端形态，面向本地大文件和长视频处理。</span>
+          </div>
+          <div class="step">
+            <strong>3. 添加新模型</strong>
+            <span>在现有 Whisper 基础上扩展新的 ASR 模型选择。</span>
+          </div>
+          <div class="step">
+            <strong>4. 多语言字幕</strong>
+            <span>支持多语言字幕轨道的编辑、预览和导出。</span>
+          </div>
+          <div class="step">
+            <strong>5. AI 纠错</strong>
+            <span>自动修复 ASR 字幕中的错字、标点、断句和口语表达。</span>
+          </div>
+          <div class="step">
+            <strong>6. 语言翻译</strong>
+            <span>将中文字幕翻译为英文字幕，形成类似 IndexTTS 的跨语言内容能力。</span>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>六项升级详解</h2>
+        </div>
+        <div class="grid">
+          <article class="card">
+            <h3>UI 改动</h3>
+            <p>把原本偏功能堆叠的界面调整为“导入、识别、校对、翻译、导出”的清晰流程，减少用户在字幕列表、播放器和设置项之间来回寻找的成本。</p>
+          </article>
+          <article class="card">
+            <h3>支持客户端</h3>
+            <p>在 Web 版本之外补充客户端方向，让用户处理本地视频时更自然，适合长视频、大文件、离线使用和更稳定的文件导出场景。</p>
+          </article>
+          <article class="card">
+            <h3>添加新模型</h3>
+            <p>扩展 ASR 模型能力，不再只依赖单一路径。用户可以根据语言、速度、准确率和本地运行条件选择更合适的识别模型。</p>
+          </article>
+          <article class="card">
+            <h3>支持多语言字幕</h3>
+            <p>新增多语言字幕轨道概念，让同一段视频可以同时管理中文、英文等多份字幕，适合课程、演示、出海短视频和跨语言内容分发。</p>
+          </article>
+          <article class="card">
+            <h3>支持 AI 纠正字幕</h3>
+            <p>ASR 生成的字幕常有错字、标点缺失、断句不自然等问题。升级版会引入 AI 纠错，让字幕从“可用”进一步接近“可发布”。</p>
+          </article>
+          <article class="card">
+            <h3>支持语言翻译</h3>
+            <p>重点支持把中文语言字幕翻译为英文语言字幕，类似 IndexTTS 的跨语言能力，让中文视频更容易生成面向国际用户的字幕版本。</p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <div class="split">
+          <div class="text-block card">
+            <h2>参赛目标用户</h2>
+            <ul>
+              <li>已有中文视频内容、希望生成英文字幕的创作者</li>
+              <li>需要批量处理课程、访谈、演示录屏的内容团队</li>
+              <li>希望在本地客户端中处理大文件的剪辑用户</li>
+              <li>对 ASR 结果准确性、校对效率和多语言发布有要求的用户</li>
+            </ul>
+          </div>
+          <div class="text-block card">
+            <h2>升级价值</h2>
+            <p>
+              本次升级的价值不在于重复证明“可以生成字幕”，而是把已有项目推进到更完整的内容生产链路：
+              识别更灵活、校对更智能、字幕支持多语言、中文内容可以一键生成英文字幕，并且客户端让本地视频处理更可靠。
+              这会让 FlyCut Caption 从一个字幕工具进化为面向创作者的 AI 字幕生产工作台。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>计划落地方向</h2>
+          <p>
+            项目已有 React、TypeScript、Vite、Transformers.js、Web Workers、FFmpeg/WebAV 等基础。
+            参赛版本会在这个基础上继续扩展桌面端、模型抽象、多语言字幕结构和 AI 后处理链路。
+          </p>
+        </div>
+        <div class="tech-list" aria-label="技术栈">
+          <span class="pill">React 19</span>
+          <span class="pill">TypeScript</span>
+          <span class="pill">Vite</span>
+          <span class="pill">Transformers.js</span>
+          <span class="pill">Whisper</span>
+          <span class="pill">New ASR Model</span>
+          <span class="pill">AI Subtitle Correction</span>
+          <span class="pill">Chinese to English Translation</span>
+          <span class="pill">Multilingual Subtitles</span>
+          <span class="pill">Desktop Client</span>
+          <span class="pill">Web Workers</span>
+          <span class="pill">FFmpeg / WebAV</span>
+        </div>
+      </section>
+
+      <section class="footer">
+        <h2>参赛总结</h2>
+        <p>
+          FlyCut Caption 已经有可访问的线上版本和代码仓库。本次参赛的重点，是在现有基础上完成一次面向真实创作者工作流的升级：
+          UI 改动、客户端支持、新模型、多语言字幕、AI 纠错字幕，以及中文到英文的语言翻译能力。
+        </p>
+        <div class="links">
+          <a class="button secondary" href="https://github.com/x007xyz/flycut-caption" target="_blank" rel="noreferrer">
+            打开代码仓库
+          </a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

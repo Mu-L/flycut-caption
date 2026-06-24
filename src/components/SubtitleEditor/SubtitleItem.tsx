@@ -1,11 +1,12 @@
-// 字幕项组件
+// 字幕项组件 - Aimu 风格
 
-import { useCallback, useState, useRef, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
-import { formatTime } from '@/utils/timeUtils';
 import type { SubtitleChunk } from '@/types/subtitle';
-import { Play, Clock, Edit2, Save, X } from 'lucide-react';
-import { useUpdateChunkText } from '@/stores/historyStore';
+import { Trash2, RotateCcw, Plus, SplitSquareHorizontal } from 'lucide-react';
+import { useUpdate, useDelete } from '@/stores/historyStore';
+import { useAppStore } from '@/stores/appStore';
+import { useTranslation } from '@/contexts/LocaleProvider';
 
 interface SubtitleItemProps {
   chunk: SubtitleChunk;
@@ -18,189 +19,180 @@ interface SubtitleItemProps {
   className?: string;
 }
 
-export function SubtitleItem({
-  chunk,
-  index,
-  isSelected,
-  isCurrent,
-  isActive,
-  onToggleSelection,
-  onSeekTo,
-  className,
-}: SubtitleItemProps) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editText, setEditText] = useState(chunk.text);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const updateChunkText = useUpdateChunkText();
+// Aimu 风格时间格式化：HH:MM:SS.mmm
+const formatAimuTime = (seconds: number) => {
+  if (isNaN(seconds) || !isFinite(seconds)) return '00:00:00.000';
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  const ms = Math.floor((seconds % 1) * 1000);
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
+};
 
-  // 当chunk文本改变时，更新编辑文本
+export function SubtitleItem(props: SubtitleItemProps) {
+  const {
+    chunk,
+    index,
+    isCurrent,
+    isActive,
+    onSeekTo,
+    className,
+    isSelected,
+    onToggleSelection
+  } = props;
+  
+  const { t } = useTranslation();
+  const update = useUpdate();
+  const deleteChunk = useDelete();
+  const displayMode = useAppStore(state => state.display);
+
+  // 本地状态，用于即时编辑
+  const [mainText, setMainText] = useState(chunk.text);
+  const [secondText, setSecondText] = useState(chunk.secondText || '');
+
+  // 当 store 中的数据改变时，同步本地状态
   useEffect(() => {
-    setEditText(chunk.text);
+    setMainText(chunk.text);
   }, [chunk.text]);
 
-  // 进入编辑模式时自动聚焦并选中文本
   useEffect(() => {
-    if (isEditing && textareaRef.current) {
-      textareaRef.current.focus();
-      textareaRef.current.select();
-    }
-  }, [isEditing]);
-
-  const handleToggleSelection = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    e.stopPropagation();
-    onToggleSelection(chunk.id);
-  }, [chunk.id, onToggleSelection]);
+    setSecondText(chunk.secondText || '');
+  }, [chunk.secondText]);
 
   const handleChunkClick = useCallback(() => {
-    if (!isEditing) {
-      onSeekTo(chunk.timestamp[0]);
-    }
-  }, [chunk.timestamp, onSeekTo, isEditing]);
-
-  const handlePlayClick = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
     onSeekTo(chunk.timestamp[0]);
   }, [chunk.timestamp, onSeekTo]);
 
-  const handleEditClick = useCallback((e: React.MouseEvent) => {
+  const handleDeleteClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsEditing(true);
-  }, []);
+    deleteChunk(chunk.id);
+  }, [chunk.id, deleteChunk]);
 
-  const handleSaveEdit = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    updateChunkText(chunk.id, editText);
-    setIsEditing(false);
-  }, [chunk.id, editText, updateChunkText]);
+  // 保存主字幕
+  const handleMainBlur = useCallback(() => {
+    if (mainText.trim() !== chunk.text) {
+      update(chunk.id, { text: mainText.trim() });
+    }
+  }, [chunk.id, mainText, chunk.text, update]);
 
-  const handleCancelEdit = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEditText(chunk.text); // 恢复原始文本
-    setIsEditing(false);
-  }, [chunk.text]);
+  // 保存副字幕
+  const handleSecondBlur = useCallback(() => {
+    const trimmed = secondText.trim();
+    if (trimmed !== (chunk.secondText || '')) {
+      update(chunk.id, { secondText: trimmed || undefined });
+    }
+  }, [chunk.id, secondText, chunk.secondText, update]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    if (e.key === 'Enter') {
       e.preventDefault();
-      handleSaveEdit(e as any);
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      handleCancelEdit(e as any);
+      (e.target as HTMLInputElement).blur(); // 触发 blur 保存
     }
-    // 阻止事件冒泡，防止触发点击事件
-    e.stopPropagation();
-  }, [handleSaveEdit, handleCancelEdit]);
-
-  const handleTextareaClick = useCallback((e: React.MouseEvent) => {
-    // 阻止事件冒泡，防止触发行点击
-    e.stopPropagation();
   }, []);
+
+  const duration = (chunk.timestamp[1] - chunk.timestamp[0]).toFixed(1);
 
   return (
     <div
       className={cn(
-        'group flex items-start space-x-3 p-3 rounded-lg cursor-pointer transition-all bg-muted/90',
-        isCurrent && 'border',
-        isSelected && 'bg-blue-50 dark:bg-blue-950/30 border-blue-200',
-        !isActive && 'opacity-50 bg-red-50 dark:bg-red-950/30',
-        isActive && !isSelected && 'hover:bg-muted/50',
+        'group flex items-stretch border-b border-aimu-border-light hover:bg-aimu-hover transition-colors bg-transparent min-h-[104px]',
+        isCurrent && 'aimu-row-active',
+        !isActive && 'opacity-60',
+        isSelected && 'bg-aimu-hover/50',
         className
       )}
       onClick={handleChunkClick}
     >
-      {/* 选择框 */}
-      <input
-        type="checkbox"
-        checked={isSelected}
-        onChange={handleToggleSelection}
-        className="mt-1 rounded"
-      />
-
-      <div className="flex flex-col space-y-1">
-        
-        {/* 序号和时间 */}
-        <div className="flex-shrink-0 text-xs text-muted-foreground flex gap-2">
-          <div className="font-mono">#{index + 1}</div>
-          <div className="flex items-center space-x-1">
-            <Clock className="h-3 w-3" />
-            <span>{formatTime(chunk.timestamp[0])}</span>
-          </div>
-        </div>
-
-        {/* 字幕内容 */}
-        <div className="flex-1 min-w-0">
-          {isEditing ? (
-            <div className="space-y-2">
-              <textarea
-                ref={textareaRef}
-                value={editText}
-                onChange={(e) => setEditText(e.target.value)}
-                onKeyDown={handleKeyDown}
-                onClick={handleTextareaClick}
-                className="w-full text-sm leading-relaxed border rounded px-2 py-1 min-h-[3rem] resize-y focus:outline-none focus:ring-2 focus:ring-primary/20"
-                placeholder="输入字幕文本..."
-              />
-              <div className="flex items-center space-x-1">
-                <button
-                  onClick={handleSaveEdit}
-                  className="flex items-center space-x-1 px-2 py-1 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded transition-colors"
-                  title="保存 (Ctrl+Enter)"
-                >
-                  <Save className="h-3 w-3" />
-                  <span>保存</span>
-                </button>
-                <button
-                  onClick={handleCancelEdit}
-                  className="flex items-center space-x-1 px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded transition-colors"
-                  title="取消 (Esc)"
-                >
-                  <X className="h-3 w-3" />
-                  <span>取消</span>
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className={cn(
-              'text-sm leading-relaxed text-primary',
-              !isActive && 'line-through text-muted-foreground'
-            )}>
-              {chunk.text}
-            </div>
+      {/* 左侧：操作图标列 (~32px) */}
+      <div className="w-8 flex-shrink-0 flex flex-col items-center py-3 gap-3 border-r border-transparent">
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={(e) => {
+            e.stopPropagation();
+            onToggleSelection(chunk.id);
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="w-3.5 h-3.5 rounded border-aimu-border text-aimu-purple focus:ring-aimu-purple/20 cursor-pointer"
+        />
+        <button
+          onClick={handleDeleteClick}
+          className={cn(
+            'p-1 rounded transition-colors',
+            isActive ? 'text-aimu-text-muted hover:text-aimu-coral' : 'text-aimu-text-muted hover:text-green-500'
           )}
-          <div className="flex items-center space-x-3 mt-2 text-xs text-muted-foreground">
-            <span>
-              {formatTime(chunk.timestamp[0])} - {formatTime(chunk.timestamp[1])}
-            </span>
-            <span>
-              时长: {((chunk.timestamp[1] - chunk.timestamp[0])).toFixed(1)}s
-            </span>
-            {!isActive && (
-              <span className="text-red-500 font-medium">已删除</span>
-            )}
-          </div>
-        </div>
-        
+          title={isActive ? t('components.workstation.deleteSegment') : t('components.workstation.restoreSegment')}
+        >
+          {isActive ? <Trash2 className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
+        </button>
+        {isActive && (
+          <>
+            <button className="p-1 rounded transition-colors text-aimu-text-muted hover:text-aimu-text-primary" title={t('components.workstation.splitMerge')}>
+              <SplitSquareHorizontal className="w-3.5 h-3.5" />
+            </button>
+            <button className="p-1 rounded transition-colors text-aimu-text-muted hover:text-aimu-text-primary" title={t('components.subtitleEditor.addSubtitle')}>
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </>
+        )}
       </div>
 
+      {/* 中间：时间码列 (~120px) */}
+      <div className="w-[120px] flex-shrink-0 flex flex-col justify-center px-3 py-2 gap-1 border-r border-transparent select-none">
+        <div className="font-mono text-[11px] text-aimu-text-muted">{formatAimuTime(chunk.timestamp[0])}</div>
+        <div className="font-mono text-[11px] text-aimu-text-muted">{formatAimuTime(chunk.timestamp[1])}</div>
+        <div className="flex items-center justify-between mt-1">
+          <div className="font-bold text-xs text-aimu-text-primary">{duration}</div>
+          <div className="text-xs text-aimu-text-muted">{index}</div>
+        </div>
+      </div>
 
-      {/* 操作按钮 */}
-      <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        {!isEditing && (
-          <button
-            onClick={handleEditClick}
-            className="p-1 hover:bg-blue-100 rounded transition-colors"
-            title="编辑字幕"
-          >
-            <Edit2 className="h-4 w-4 text-blue-600" />
-          </button>
+      {/* 右侧：双语文本编辑列 (flex-1) */}
+      <div className="flex-1 flex flex-col justify-center py-2 px-4">
+        {/* 主字幕输入框 */}
+        {(displayMode === 'Bilingual' || displayMode === 'Main') && (
+          <div className="flex-1 flex items-center">
+            <textarea
+              value={mainText}
+              onChange={(e) => setMainText(e.target.value)}
+              onBlur={handleMainBlur}
+              onKeyDown={handleKeyDown}
+              onClick={(e) => e.stopPropagation()}
+              className={cn(
+                'w-full bg-transparent border-none focus:outline-none focus:ring-0 text-sm p-1 text-aimu-text-primary resize-none overflow-hidden',
+                !isActive && 'line-through text-aimu-text-muted'
+              )}
+              placeholder={t('components.workstation.mainSubtitlePlaceholder')}
+              rows={1}
+              style={{ minHeight: '24px' }}
+            />
+          </div>
         )}
-        <button
-          onClick={handlePlayClick}
-          className="p-1 hover:bg-primary/10 rounded transition-colors"
-          title="跳转到此处"
-        >
-          <Play className="h-4 w-4 text-primary" />
-        </button>
+
+        {/* 分割线 */}
+        {displayMode === 'Bilingual' && (
+          <div className="h-px w-full bg-aimu-border-light my-1 opacity-50"></div>
+        )}
+
+        {/* 副字幕输入框 */}
+        {(displayMode === 'Bilingual' || displayMode === 'Second') && (
+          <div className="flex-1 flex items-center">
+            <textarea
+              value={secondText}
+              onChange={(e) => setSecondText(e.target.value)}
+              onBlur={handleSecondBlur}
+              onKeyDown={handleKeyDown}
+              onClick={(e) => e.stopPropagation()}
+              className={cn(
+                'w-full bg-transparent border-none focus:outline-none focus:ring-0 text-sm p-1 text-aimu-text-secondary resize-none overflow-hidden',
+                !isActive && 'line-through text-aimu-text-muted'
+              )}
+              placeholder={t('components.workstation.secondSubtitlePlaceholder')}
+              rows={1}
+              style={{ minHeight: '24px' }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

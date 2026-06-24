@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Languages, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useTranslation } from '@/contexts/LocaleProvider';
 
 interface LanguageOption {
   code: string;
@@ -31,6 +32,7 @@ export function LanguageSelector({
   languages,
   onLanguageChange
 }: LanguageSelectorProps) {
+  const { t } = useTranslation();
   const currentLangInfo = languages.find(lang =>
     lang.code === currentLanguage ||
     lang.code === currentLanguage.split('-')[0]
@@ -47,6 +49,7 @@ export function LanguageSelector({
           <Button
             variant="ghost"
             size="sm"
+            aria-label={t('components.languageSelector.selectLanguage')}
             className={cn("h-8 px-2", className)}
           >
             <Languages className="h-4 w-4" />
@@ -60,6 +63,7 @@ export function LanguageSelector({
           <Button
             variant="outline"
             size="sm"
+            aria-label={t('components.languageSelector.selectLanguage')}
             className={cn("h-9 px-3", className)}
           >
             <Languages className="h-4 w-4" />

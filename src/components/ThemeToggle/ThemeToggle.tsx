@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
+import { useTranslation } from '@/contexts/LocaleProvider';
 
 interface ThemeToggleProps {
   variant?: 'select' | 'button';
@@ -16,9 +17,9 @@ interface ThemeToggleProps {
 }
 
 const themeOptions = [
-  { value: 'light', label: '浅色', icon: Sun },
-  { value: 'dark', label: '深色', icon: Moon },
-  { value: 'system', label: '跟随系统', icon: Monitor },
+  { value: 'light', labelKey: 'components.themeToggle.light', icon: Sun },
+  { value: 'dark', labelKey: 'components.themeToggle.dark', icon: Moon },
+  { value: 'system', labelKey: 'components.themeToggle.auto', icon: Monitor },
 ] as const;
 
 export const ThemeToggle: React.FC<ThemeToggleProps> = ({ 
@@ -26,6 +27,7 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({
   className 
 }) => {
   const { theme, setTheme, toggleTheme } = useThemeStore();
+  const { t } = useTranslation();
 
   if (variant === 'select') {
     return (
@@ -38,7 +40,7 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({
               return (
                 <div className="flex items-center gap-2">
                   <Icon className="h-4 w-4" />
-                  <span>{currentOption?.label}</span>
+                  <span>{currentOption ? t(currentOption.labelKey) : t('components.themeToggle.auto')}</span>
                 </div>
               );
             })()}
@@ -51,7 +53,7 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({
               <SelectItem key={option.value} value={option.value}>
                 <div className="flex items-center gap-2">
                   <Icon className="h-4 w-4" />
-                  <span>{option.label}</span>
+                  <span>{t(option.labelKey)}</span>
                 </div>
               </SelectItem>
             );
@@ -71,10 +73,10 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({
       size="icon"
       onClick={toggleTheme}
       className={className}
-      title={`当前主题: ${currentOption?.label || '未知'}`}
+      title={`${t('components.themeToggle.currentTheme')}: ${currentOption ? t(currentOption.labelKey) : t('components.themeToggle.auto')}`}
     >
       <Icon className="h-4 w-4" />
-      <span className="sr-only">切换主题</span>
+      <span className="sr-only">{t('components.themeToggle.toggleTheme')}</span>
     </Button>
   );
 };

@@ -381,7 +381,7 @@ function App() {
   return (
     <FlyCutCaption
       config={{
-        theme: 'light',
+        theme: 'auto',
         language: currentLanguage
       }}
       locale={currentLocale}

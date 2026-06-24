@@ -2,9 +2,11 @@
 
 export interface SubtitleChunk {
   text: string;
+  secondText?: string; // 副字幕文本
   timestamp: [number, number]; // [start, end] in seconds
   id: string;
   selected?: boolean; // 是否被选中删除
+  deleted?: boolean; // 是否被删除
 }
 
 export interface SubtitleTranscript {

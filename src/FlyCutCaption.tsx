@@ -2,12 +2,10 @@
 
 import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/stores/appStore';
-import { useChunks } from '@/stores/historyStore';
+import { useChunks, useSetTranscript } from '@/stores/historyStore';
 import { useThemeStore } from '@/stores/themeStore';
 import { useHotkeys } from '@/hooks/useHotkeys';
 import { LocaleProvider, useTranslation, useLocale } from '@/contexts/LocaleProvider';
-import type { FlyCutCaptionLocale } from '@/locales';
-import { FileUpload } from '@/components/FileUpload/FileUpload';
 import { EnhancedVideoPlayer } from '@/components/VideoPlayer/EnhancedVideoPlayer';
 import type { EnhancedVideoPlayerRef } from '@/components/VideoPlayer/EnhancedVideoPlayer';
 import { SubtitleList } from '@/components/SubtitleEditor/SubtitleList';
@@ -19,6 +17,7 @@ import { ToastContainer, MessageCenterButton } from '@/components/MessageCenter'
 import { LanguageSelector } from '@/components/LanguageSelector';
 import { SubtitleSettings, defaultSubtitleStyle } from '@/components/SubtitleSettings';
 import type { SubtitleStyle } from '@/components/SubtitleSettings';
+import { cn } from '@/lib/utils';
 import {
   useStartVideoProcessing,
   useUpdateVideoProcessingProgress,
@@ -27,19 +26,310 @@ import {
 } from '@/stores/messageStore';
 import { UnifiedVideoProcessor } from '@/services/UnifiedVideoProcessor';
 import { saveFile } from '@/utils/createFileWriter';
-import { Scissors, FileText, Upload, Download, Video } from 'lucide-react';
+import { AudioWaveform, Download, Github, Maximize2, Mic2, Play, Redo2, Scissors, Upload, Wand2, Keyboard, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
 import {
-  Menubar,
-  MenubarContent,
-  MenubarItem,
-  MenubarMenu,
-  MenubarSeparator,
-  MenubarTrigger,
-} from "@/components/ui/menubar";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { SubtitleChunk } from '@/types/subtitle';
 import type { VideoFile, VideoSegment, VideoProcessingProgress } from '@/types/video';
 import type { VideoProcessingOptions, VideoEngineType } from '@/types/videoEngine';
-import type { FlyCutCaptionProps, FlyCutCaptionConfig } from './types';
+import type { FlyCutCaptionProps } from './types';
 import { defaultConfig } from './types';
+
+type AimuTab = 'style' | 'tools' | 'options' | 'api';
+type ShadowSize = 'N' | 'S' | 'M' | 'L';
+type DisplayMode = 'Bilingual' | 'Main' | 'Second';
+
+interface BrowserPerformanceMemory {
+  usedJSHeapSize: number;
+  totalJSHeapSize: number;
+  jsHeapSizeLimit: number;
+}
+
+const mockTranscript = {
+  language: 'zh',
+  duration: 44.8,
+  text: 'Aimu 风格字幕编辑演示',
+  chunks: [
+    {
+      id: 'mock-1',
+      text: '今天我们把一段口播快速整理成适合发布的双语字幕。',
+      secondText: 'Today we turn a spoken clip into bilingual captions ready to publish.',
+      timestamp: [0.2, 4.8] as [number, number],
+    },
+    {
+      id: 'mock-2',
+      text: '先识别音频，再在时间轴上微调每一句的起止点。',
+      secondText: 'First transcribe the audio, then tune every sentence on the timeline.',
+      timestamp: [5.2, 9.6] as [number, number],
+    },
+    {
+      id: 'mock-3',
+      text: '删除停顿和口误后，预览模式会自动跳过被裁掉的片段。',
+      secondText: 'After removing pauses and mistakes, preview mode skips the cut segments.',
+      timestamp: [10.4, 15.7] as [number, number],
+    },
+    {
+      id: 'mock-4',
+      text: '字幕样式可以直接同步到左侧视频预览。',
+      secondText: 'Caption styling syncs directly to the video preview on the left.',
+      timestamp: [16.3, 20.8] as [number, number],
+    },
+    {
+      id: 'mock-5',
+      text: '底部波形用来快速定位声音峰值和空白区间。',
+      secondText: 'The waveform below helps locate peaks and silent gaps quickly.',
+      timestamp: [21.7, 26.1] as [number, number],
+    },
+    {
+      id: 'mock-6',
+      text: '最后导出 SRT、JSON，或者把字幕直接烧录进视频。',
+      secondText: 'Finally export SRT, JSON, or burn the captions into the video.',
+      timestamp: [27.2, 32.4] as [number, number],
+    },
+  ],
+};
+
+const waveformBars = Array.from({ length: 168 }, (_, index) => {
+  const signal = Math.sin(index * 0.43) * 0.38 + Math.sin(index * 0.13 + 1.4) * 0.28;
+  const pulse = index % 17 === 0 ? 0.28 : 0;
+  return Math.max(14, Math.min(86, Math.round(44 + signal * 58 + pulse * 100)));
+});
+
+const formatTimelineTime = (seconds: number) => {
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+};
+
+function MockVideoPreview({ className }: { className?: string }) {
+  const { t } = useTranslation();
+
+  return (
+    <div data-testid="mock-video-preview" className={cn('mock-video-preview relative h-full w-full overflow-hidden', className)}>
+      <div className="mock-video-preview-bg absolute inset-0" />
+      <div className="mock-video-frame absolute inset-x-[12%] top-[12%] aspect-video rounded border shadow-2xl">
+        <div className="mock-video-grid absolute inset-0 bg-[size:42px_42px] opacity-55" />
+        <div className="mock-video-badge absolute left-6 top-5 flex items-center gap-2 rounded px-2 py-1 text-[11px]">
+          <span className="h-1.5 w-1.5 rounded-full bg-aimu-coral" />
+          {t('components.workstation.mockPreview')}
+        </div>
+        <div className="absolute inset-x-8 bottom-12 text-center">
+          <div className="mock-subtitle-primary mx-auto inline-block max-w-[82%] rounded px-4 py-2 text-[22px] font-semibold leading-snug shadow-lg">
+            {t('components.workstation.mockSubtitlePrimary')}
+          </div>
+          <div className="mock-subtitle-secondary mx-auto mt-2 inline-block max-w-[82%] rounded px-3 py-1.5 text-sm">
+            {t('components.workstation.mockSubtitleSecondary')}
+          </div>
+        </div>
+        <button className="mock-play-button absolute left-1/2 top-1/2 flex h-14 w-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full backdrop-blur">
+          <Play className="h-7 w-7 fill-current" />
+        </button>
+      </div>
+      <div className="mock-video-meta absolute bottom-4 left-4 right-4 flex items-center justify-between text-[11px]">
+        <div className="flex items-center gap-2">
+          <Mic2 className="h-3.5 w-3.5 text-aimu-coral" />
+          <span>{t('components.workstation.mockFileName')}</span>
+        </div>
+        <div className="flex items-center gap-3 font-mono">
+          <span>00:21.7</span>
+          <span>/</span>
+          <span>00:44.8</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TimelineWaveform({
+  currentTime,
+  duration,
+  chunks,
+  onSeek,
+}: {
+  currentTime: number;
+  duration: number;
+  chunks: Array<Pick<SubtitleChunk, 'id' | 'timestamp' | 'deleted' | 'text' | 'secondText'>>;
+  onSeek?: (time: number) => void;
+}) {
+  const { t } = useTranslation();
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(1);
+  const safeDuration = Math.max(duration, 1);
+  const progress = Math.max(0, Math.min(100, (currentTime / safeDuration) * 100));
+  const minZoom = 1;
+  const maxZoom = 8;
+  const zoomPercent = Math.round(zoom * 100);
+  const rulerTicks = Array.from({ length: Math.floor(safeDuration) + 1 }, (_, index) => ({
+    time: index,
+    left: (index / safeDuration) * 100,
+    major: index % 5 === 0,
+  }));
+
+  const handleZoomOut = useCallback(() => {
+    setZoom((currentZoom) => Math.max(minZoom, Number((currentZoom / 1.5).toFixed(2))));
+  }, []);
+
+  const handleZoomIn = useCallback(() => {
+    setZoom((currentZoom) => Math.min(maxZoom, Number((currentZoom * 1.5).toFixed(2))));
+  }, []);
+
+  const handleFitTimeline = useCallback(() => {
+    setZoom(minZoom);
+    viewportRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
+  }, []);
+
+  const handleTimelineClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!onSeek) return;
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+    onSeek(ratio * safeDuration);
+  }, [onSeek, safeDuration]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || zoom === minZoom) return;
+
+    const markerLeft = (progress / 100) * viewport.scrollWidth;
+    const visibleStart = viewport.scrollLeft;
+    const visibleEnd = visibleStart + viewport.clientWidth;
+    const margin = 48;
+
+    if (markerLeft < visibleStart + margin || markerLeft > visibleEnd - margin) {
+      viewport.scrollTo({
+        left: Math.max(0, markerLeft - viewport.clientWidth / 2),
+        behavior: 'smooth',
+      });
+    }
+  }, [progress, zoom]);
+
+  return (
+    <div className="h-[132px] shrink-0 border-t border-aimu-border bg-aimu-panel">
+      <div className="flex h-8 items-center justify-between border-b border-aimu-border px-3">
+        <div className="flex items-center gap-1.5 text-xs text-aimu-text-secondary">
+          <AudioWaveform className="h-4 w-4 text-aimu-coral" />
+          <span className="font-medium text-aimu-text-primary">{t('components.workstation.timeline')}</span>
+          <span className="font-mono text-[11px] text-aimu-text-muted">{formatTimelineTime(currentTime)} / {formatTimelineTime(safeDuration)}</span>
+        </div>
+        <div className="flex items-center gap-1 text-aimu-text-muted">
+          <button className="rounded p-1 hover:bg-aimu-hover hover:text-aimu-text-primary" title={t('components.workstation.cut')}>
+            <Scissors className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={handleZoomOut}
+            disabled={zoom <= minZoom}
+            className="rounded p-1 hover:bg-aimu-hover hover:text-aimu-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+            title={t('components.subtitleEditor.zoomOut')}
+          >
+            <ZoomOut className="h-3.5 w-3.5" />
+          </button>
+          <span className="w-10 text-center font-mono text-[10px] tabular-nums text-aimu-text-secondary">
+            {zoomPercent}%
+          </span>
+          <button
+            type="button"
+            onClick={handleZoomIn}
+            disabled={zoom >= maxZoom}
+            className="rounded p-1 hover:bg-aimu-hover hover:text-aimu-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+            title={t('components.subtitleEditor.zoomIn')}
+          >
+            <ZoomIn className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={handleFitTimeline}
+            disabled={zoom === minZoom}
+            className="rounded p-1 hover:bg-aimu-hover hover:text-aimu-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+            title={t('components.workstation.fit')}
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+      <div className="h-[100px] px-3 py-2">
+        <div ref={viewportRef} className="h-full overflow-x-auto overflow-y-hidden">
+          <div className="relative h-full min-w-full" style={{ width: `${zoom * 100}%` }}>
+            <div
+              data-testid="timeline-ruler"
+              className="timeline-ruler absolute left-0 right-0 top-0 h-6 cursor-pointer overflow-hidden rounded border border-aimu-border bg-aimu-input"
+              onClick={handleTimelineClick}
+            >
+              {rulerTicks.map((tick) => (
+                <div
+                  key={tick.time}
+                  className={cn(
+                    'absolute bottom-0 w-px -translate-x-px',
+                    tick.major ? 'h-4 bg-aimu-text-primary' : 'h-2 bg-aimu-text-muted/70'
+                  )}
+                  style={{ left: `${tick.left}%` }}
+                >
+                  {tick.major && (
+                    <span className="absolute left-1 top-0 whitespace-nowrap font-mono text-[10px] leading-none text-aimu-text-secondary">
+                      {formatTimelineTime(tick.time)}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div
+              className="absolute bottom-1 left-0 right-0 top-8 cursor-pointer rounded border border-aimu-border bg-aimu-input"
+              onClick={handleTimelineClick}
+            >
+              <div className="absolute inset-x-0 top-1/2 h-px bg-aimu-border-light" />
+              <div className="absolute inset-0 flex items-center gap-[2px] px-2">
+                {waveformBars.map((height, index) => (
+                  <span
+                    key={index}
+                    className="flex-1 rounded-full bg-aimu-coral/65"
+                    style={{ height: `${height}%`, opacity: index % 5 === 0 ? 0.95 : 0.62 }}
+                  />
+                ))}
+              </div>
+              {chunks.map((chunk) => {
+                const left = (chunk.timestamp[0] / safeDuration) * 100;
+                const width = ((chunk.timestamp[1] - chunk.timestamp[0]) / safeDuration) * 100;
+                const label = [chunk.text, chunk.secondText].filter(Boolean).join(' / ');
+                return (
+                  <div
+                    key={chunk.id}
+                    className={cn(
+                      'absolute bottom-1 top-1 flex cursor-pointer items-center overflow-hidden rounded-sm border px-1.5 shadow-sm',
+                      chunk.deleted
+                        ? 'border-aimu-coral/45 bg-aimu-coral/18'
+                        : 'border-aimu-purple/65 bg-aimu-purple/30'
+                    )}
+                    style={{ left: `${left}%`, width: `${Math.max(width, 2 / zoom)}%` }}
+                    title={label}
+                  >
+                    <span
+                      className={cn(
+                        'min-w-0 truncate text-[10px] font-medium leading-none opacity-75',
+                        chunk.deleted
+                          ? 'text-aimu-coral line-through decoration-aimu-coral'
+                          : 'text-aimu-text-primary'
+                      )}
+                    >
+                      {label}
+                    </span>
+                  </div>
+                );
+              })}
+              <div className="pointer-events-none absolute bottom-0 top-0 w-px bg-white shadow-[0_0_0_1px_rgba(245,108,108,0.65)]" style={{ left: `${progress}%` }}>
+                <div className="absolute -left-1.5 -top-1 h-3 w-3 rounded-full bg-aimu-coral" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /**
  * FlyCut Caption React Component
@@ -83,10 +373,8 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
     className,
     style,
     config = {},
-    locale,
     onReady,
     onFileSelected,
-    onSubtitleGenerated,
     onSubtitleChanged,
     onVideoProcessed,
     onExportComplete,
@@ -104,16 +392,59 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
 
   const stage = useAppStore(state => state.stage);
   const videoFile = useAppStore(state => state.videoFile);
-  const error = useAppStore(state => state.error);
-  const isLoading = useAppStore(state => state.isLoading);
+  const shadow = useAppStore(state => state.shadow);
+  const font = useAppStore(state => state.font);
+  const display = useAppStore(state => state.display);
+  const setShadow = useAppStore(state => state.setShadow);
+  const setFont = useAppStore(state => state.setFont);
+  const setDisplay = useAppStore(state => state.setDisplay);
   const chunks = useChunks();
+  const setTranscript = useSetTranscript();
+
+  // 内存使用情况状态 (Aimu 风格)
+  const [memory, setMemory] = useState({ used: '42.63 MB', allocated: '54.17 MB', limit: '3.5 GB' });
+
+  useEffect(() => {
+    const updateMemory = () => {
+      const performanceWithMemory =
+        typeof window !== 'undefined'
+          ? window.performance as Performance & { memory?: BrowserPerformanceMemory }
+          : undefined;
+
+      if (performanceWithMemory?.memory) {
+        const mem = performanceWithMemory.memory;
+        const limitGB = mem.jsHeapSizeLimit / 1024 / 1024 / 1024;
+        setMemory({
+          used: `${(mem.usedJSHeapSize / 1024 / 1024).toFixed(2)} MB`,
+          allocated: `${(mem.totalJSHeapSize / 1024 / 1024).toFixed(2)} MB`,
+          limit: isNaN(limitGB) ? '4.0 GB' : `${limitGB.toFixed(1)} GB`
+        });
+      } else {
+        const used = (40 + Math.random() * 5).toFixed(2);
+        const allocated = (50 + Math.random() * 5).toFixed(2);
+        setMemory({
+          used: `${used} MB`,
+          allocated: `${allocated} MB`,
+          limit: '4.0 GB'
+        });
+      }
+    };
+
+    updateMemory();
+    const interval = setInterval(updateMemory, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Tab 状态 (Aimu 风格)
+  const [activeTab, setActiveTab] = useState<AimuTab>('style');
 
   // 主题管理
-  const { theme, resolvedTheme, setTheme } = useThemeStore();
+  const { resolvedTheme } = useThemeStore();
+  const effectiveTheme = mergedConfig.theme === 'auto' ? resolvedTheme : mergedConfig.theme;
 
   // 国际化
   const { t } = useTranslation();
-  const { language, setLanguage, getAvailableLanguages } = useLocale();
+  const { language, setLanguage } = useLocale();
 
   // 语言选项
   const languageOptions = [
@@ -122,7 +453,80 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
     { code: 'ja', name: 'Japanese', nativeName: '日本語' }
   ];
 
+  const tabOptions: Array<{ id: AimuTab; label: string }> = [
+    { id: 'style', label: t('components.workstation.style') },
+    { id: 'tools', label: t('components.workstation.tools') },
+    { id: 'options', label: t('components.workstation.options') },
+    { id: 'api', label: t('components.workstation.api') },
+  ];
+
+  const plannedFeatures = {
+    tools: [
+      {
+        title: t('components.workstation.swapTitle'),
+        description: t('components.workstation.swapDescription'),
+      },
+      {
+        title: t('components.workstation.aiTranslationTitle'),
+        description: t('components.workstation.aiTranslationDescription'),
+      },
+      {
+        title: t('components.workstation.ttsTitle'),
+        description: t('components.workstation.ttsDescription'),
+      },
+    ],
+    options: [
+      {
+        title: t('components.workstation.timelineWaveformTitle'),
+        description: t('components.workstation.timelineWaveformDescription'),
+      },
+      {
+        title: t('components.workstation.shortcutEditorTitle'),
+        description: t('components.workstation.shortcutEditorDescription'),
+      },
+      {
+        title: t('components.workstation.batchOperationsTitle'),
+        description: t('components.workstation.batchOperationsDescription'),
+      },
+    ],
+    api: [
+      {
+        title: t('components.workstation.onlineHardcodingTitle'),
+        description: t('components.workstation.onlineHardcodingDescription'),
+      },
+      {
+        title: t('components.workstation.videoTranscodingTitle'),
+        description: t('components.workstation.videoTranscodingDescription'),
+      },
+      {
+        title: t('components.workstation.externalAsrTitle'),
+        description: t('components.workstation.externalAsrDescription'),
+      },
+    ],
+  };
+
+  const renderFeatureItems = (items: Array<{ title: string; description: string }>) => (
+    <div className="space-y-1.5">
+      {items.map((item) => (
+        <div key={item.title} className="flex items-center gap-2 p-2 border border-border rounded bg-muted/5">
+          <span className="w-1.5 h-1.5 bg-amber-500 rounded-full flex-shrink-0" />
+          <div className="flex-1">
+            <div className="text-xs font-semibold">{item.title}</div>
+            <div className="text-[10px] text-muted-foreground">{item.description}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
   // Component is ready, render the main content
+
+  useEffect(() => {
+    if (chunks.length === 0) {
+      setTranscript(mockTranscript);
+      useAppStore.getState().setStage('edit');
+    }
+  }, [chunks.length, setTranscript]);
 
   // Component ready effect
   useEffect(() => {
@@ -134,34 +538,12 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
     return () => clearTimeout(timer)
   }, [onReady]);
 
-  // Apply theme configuration
+  // 初始化主题 - 确保 wrapper 与全局 DOM 使用同一套变量
   useEffect(() => {
-    if (mergedConfig.theme && mergedConfig.theme !== 'auto') {
-      const root = document.documentElement
-
-      // Apply theme globally (for consistency with main app)
-      if (mergedConfig.theme === 'dark') {
-        root.classList.add('dark')
-      } else {
-        root.classList.remove('dark')
-      }
-    }
-  }, [mergedConfig.theme]);
-
-  // 初始化主题 - 确保在客户端正确应用
-  useEffect(() => {
-    // 确保主题正确应用到 DOM
-    const applyTheme = (theme: 'light' | 'dark') => {
-      const root = document.documentElement;
-      if (theme === 'dark') {
-        root.classList.add('dark');
-      } else {
-        root.classList.remove('dark');
-      }
-    };
-
-    applyTheme(resolvedTheme);
-  }, [resolvedTheme]);
+    const root = document.documentElement;
+    root.classList.remove('light', 'dark');
+    root.classList.add(effectiveTheme);
+  }, [effectiveTheme]);
 
   // 消息中心钩子
   const startVideoProcessing = useStartVideoProcessing();
@@ -181,13 +563,8 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
     [chunks]
   );
 
-  // 缓存 activeChunks 的长度，避免在渲染中重复计算
-  const hasActiveChunks = useMemo(
-    () => activeChunks.length > 0,
-    [activeChunks.length]
-  );
+  const currentTime = useAppStore(state => state.currentTime);
   const setCurrentTime = useAppStore(state => state.setCurrentTime);
-  const setStage = useAppStore(state => state.setStage);
   const setError = useAppStore(state => state.setError);
 
   // 视频处理相关状态
@@ -205,6 +582,18 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
 
   // 视频播放器引用
   const videoPlayerRef = useRef<EnhancedVideoPlayerRef>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+
+  const timelineDuration = useMemo(() => {
+    const chunkEndTime = chunks.reduce((maxTime, chunk) => Math.max(maxTime, chunk.timestamp[1]), 0);
+    return Math.max(videoFile?.duration || 0, chunkEndTime, mockTranscript.duration);
+  }, [chunks, videoFile?.duration]);
+
+  const handleTimelineSeek = useCallback((time: number) => {
+    const nextTime = Math.max(0, Math.min(timelineDuration, time));
+    setCurrentTime(nextTime);
+    videoPlayerRef.current?.seekTo(nextTime);
+  }, [setCurrentTime, timelineDuration]);
 
 
   // const availableEngines = UnifiedVideoProcessor.getSupportedEngines();
@@ -349,6 +738,22 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
     onFileSelected?.(selectedVideoFile);
   }, [onFileSelected]);
 
+  const handleNativeFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const selectedVideoFile: VideoFile = {
+      file,
+      url: URL.createObjectURL(file),
+      duration: 0,
+      size: file.size,
+      type: file.type,
+      name: file.name,
+    };
+
+    handleFileSelect(selectedVideoFile);
+  }, [handleFileSelect]);
+
   // 从字幕生成视频片段 - 包含所有片段的删除状态和字幕信息
   const videoSegments = useMemo((): VideoSegment[] => {
     return chunks.map(chunk => ({
@@ -378,13 +783,7 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
       });
       setError(`${t('messages.export.exportFailed')}: ${error instanceof Error ? error.message : t('common.error')}`);
     }
-  }, [videoFile, videoSegments, processVideo, setStage, setError, t]);
-
-  // 打开字幕导出对话框
-  const handleOpenSubtitleExportDialog = useCallback(() => {
-    setExportDialogType('subtitles');
-    setExportDialogOpen(true);
-  }, []);
+  }, [videoFile, videoSegments, processVideo, setError, t]);
 
   // 打开视频导出对话框
   const handleOpenVideoExportDialog = useCallback(() => {
@@ -408,303 +807,297 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
     onSubtitleChanged?.(activeChunks);
   }, [activeChunks, onSubtitleChanged]);
 
-  // 渲染左侧面板
-  const renderLeftPanel = () => {
-    return (
-      <div className="flex flex-col h-full overflow-hidden">
-        {/* 配置面板 */}
-        {stage === 'transcribe' && <div className="flex-shrink-0 p-4">
-          <div className="space-y-4">
-            {/* 语言选择 */}
-            <div>
-              <label className="text-sm font-medium mb-2 block">{t('components.asrPanel.language')}</label>
-              <ASRPanel />
-            </div>
-          </div>
-        </div>}
-
-        {/* 字幕编辑器 */}
-        {stage === 'edit' && <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="p-4">
-            <h3 className="text-sm font-medium flex items-center space-x-2">
-              <FileText className="h-4 w-4" />
-              <span>{t('components.subtitleEditor.title')}</span>
-            </h3>
-            <p className="text-xs text-muted-foreground mt-1">
-              {t('components.subtitleEditor.title')}
-            </p>
-          </div>
-
-          <div className="flex-1 overflow-hidden">
-            <SubtitleList videoPlayerRef={videoPlayerRef} />
-          </div>
-        </div>}
-
-      </div>
-    );
-  };
-
-  // 渲染右侧面板
-  const renderRightPanel = () => {
-    if (!videoFile) {
-      // 没有视频文件时显示上传区域
-      return (
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="max-w-md w-full">
-            <div className="text-center mb-8">
-              <div className="flex justify-center mb-4">
-                <div className="p-6 bg-primary/10 rounded-2xl">
-                  <Upload className="h-16 w-16 text-primary" />
-                </div>
-              </div>
-              <h2 className="text-2xl font-bold mb-4">{t('components.fileUpload.selectFile')}</h2>
-              <p className="text-muted-foreground text-sm" dangerouslySetInnerHTML={{ __html: t('components.fileUpload.dragDropText') }} />
-            </div>
-
-            <FileUpload
-              onFileSelect={handleFileSelect}
-              className="w-full"
-            />
-          </div>
-        </div>
-      );
-    }
-
-    // 有视频文件时显示视频播放器和波形图
-    return (
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* 顶部状态栏 */}
-        <div className="flex-shrink-0 p-4 bg-background/50">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2 text-sm">
-              <div className="w-2 h-2 bg-green-500 rounded-full" />
-              <span>{videoFile.name}</span>
-            </div>
-
-            {/* 错误和加载提示 */}
-            <div className="flex items-center space-x-2">
-              {error && (
-                <div className="px-2 py-1 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded text-xs text-red-600">
-                  {error}
-                </div>
-              )}
-              {isLoading && (
-                <div className="px-2 py-1 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded text-xs text-blue-600 flex items-center space-x-1">
-                  <div className="animate-spin rounded-full h-3 w-3 border-b border-blue-600" />
-                  <span>{t('common.loading')}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* 视频播放器区域 */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 bg-black/5 flex items-center justify-center p-6 overflow-hidden">
-            <div className="w-full h-full max-w-4xl">
-              <EnhancedVideoPlayer
-                ref={videoPlayerRef}
-                videoUrl={videoFile.url}
-                className="w-full h-full"
-                onTimeUpdate={(time) => setCurrentTime(time)}
-                subtitleStyle={subtitleStyle}
-                onSubtitleStyleChange={setSubtitleStyle}
-              />
-            </div>
-          </div>
-
-          {/* 波形图和时间线区域 */}
-          {/* <div className="flex-shrink-0 h-32 bg-background/50 p-4">
-            <div className="h-full bg-muted/30 rounded border-2 border-dashed border-muted-foreground/20 flex items-center justify-center">
-              <div className="text-center text-muted-foreground">
-                <div className="text-xs mb-1">音频波形图</div>
-                <div className="text-xs opacity-60">即将推出</div>
-              </div>
-            </div>
-          </div> */}
-        </div>
-
-      </div>
-    );
-  };
-
-  // 渲染右侧字幕设置面板
-  const renderSubtitleSettingsPanel = () => {
-    // 如果没有视频文件，显示占位内容
-    if (!videoFile) {
-      return (
-        <div className="flex flex-col h-full">
-          <div className="flex-shrink-0 p-4 border-b">
-            <h2 className="text-sm font-semibold">{t('components.subtitleEditor.subtitleStyle')}</h2>
-            <p className="text-xs text-muted-foreground mt-1">{t('components.subtitleEditor.subtitleStyle')}</p>
-          </div>
-          <div className="flex-1 flex items-center justify-center p-4">
-            <div className="text-center text-muted-foreground">
-              <div className="text-xs opacity-60">{t('common.loading')}</div>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    // 有视频文件时显示字幕设置面板
-    return (
-      <div className="flex flex-col h-full">
-        <div className="flex-1 overflow-y-auto">
-          <SubtitleSettings
-            style={subtitleStyle}
-            onStyleChange={setSubtitleStyle}
-          />
-        </div>
-      </div>
-    );
-  };
-
-  // Determine wrapper theme class
-  const getThemeClass = () => {
-    if (mergedConfig.theme === 'dark') return 'dark'
-    if (mergedConfig.theme === 'light') return ''
-
-    // Auto theme: detect system preference
-    if (typeof window !== 'undefined' && window.matchMedia) {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : ''
-    }
-    return ''
-  };
-
   return (
     <div
-      className={`flycut-caption-wrapper ${getThemeClass()} ${className || ''}`}
+      className={`flycut-caption-wrapper ${effectiveTheme} ${className || ''}`}
       style={style}
       {...otherProps}
     >
       <div className="h-screen bg-background flex flex-col">
-        {/* 顶部标题栏 */}
-        <header className="flex-shrink-0 bg-card shadow-sm border-b border-background/90 z-10">
-          <div className="px-6 py-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 bg-primary/10 rounded-lg">
-                  <Scissors className="h-5 w-5 text-primary" />
+        {/* 顶部标题栏 - Aimu 风格 */}
+        <header className="flex-shrink-0 h-14 bg-card border-b border-border z-10 flex items-center justify-between px-4">
+          {/* LEFT */}
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <a href="https://www.aimu-app.com/" target="_blank" rel="noreferrer" className="text-lg font-bold tracking-tight hover:text-primary transition-colors">
+                {t('components.workstation.appName')}
+              </a>
+              <span className="text-[10px] px-1.5 py-0.5 bg-primary/10 text-primary rounded font-mono">v2.0.0</span>
+            </div>
+            
+            <div className="h-4 w-px bg-border mx-2"></div>
+            
+            <div className="create-menu relative">
+              <button data-testid="create-trigger" className="flex items-center space-x-1.5 text-sm font-medium hover:text-primary transition-colors">
+                <Wand2 className="w-4 h-4" />
+                <span>{t('components.workstation.create')}</span>
+              </button>
+              <div data-testid="create-popover" className="create-popover aimu-floating-panel absolute left-0 top-full z-50 mt-4 w-[280px] rounded border p-3 shadow-2xl backdrop-blur">
+                <div className="mb-2 flex items-center gap-2 text-xs font-medium text-aimu-text-primary">
+                  <Upload className="h-3.5 w-3.5 text-aimu-coral" />
+                  <span>{t('components.workstation.create')}</span>
                 </div>
-                <div>
-                  <h1 className="text-lg font-bold">{'FlyCut Caption'}</h1>
-                  <p className="text-xs text-muted-foreground">{'Intelligent video subtitle cropping tool'}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center space-x-4">
-                {/* 语言切换按钮 */}
-                {mergedConfig.enableLanguageSelector !== false && (
-                  <LanguageSelector
-                    variant="minimal"
-                    currentLanguage={language}
-                    languages={languageOptions}
-                    onLanguageChange={(newLanguage) => {
-                      setLanguage(newLanguage);
-                      // 如果有外部回调，也调用它
-                      if (onLanguageChange) {
-                        onLanguageChange(newLanguage);
-                      }
-                    }}
-                  />
-                )}
-
-                {/* 主题切换按钮 */}
-                {mergedConfig.enableThemeToggle !== false && (
-                  <ThemeToggle variant="button" />
-                )}
-
-                {/* 消息中心按钮 */}
-                <MessageCenterButton />
-
-                {/* 操作菜单栏 - 平铺展示 */}
-                <Menubar className="h-auto border bg-card rounded-lg p-1 gap-0.5 shadow-sm">
-                  {/* 文件菜单 */}
-                  <MenubarMenu>
-                    <MenubarTrigger
-                      className="h-8 px-3 py-1.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground"
-                      disabled={false}
-                    >
-                      <Upload className="h-4 w-4 mr-1.5" />
-                      <span className="hidden sm:inline">{t('common.upload')}</span>
-                    </MenubarTrigger>
-                    <MenubarContent align="start" className="min-w-[160px]">
-                      <MenubarItem onClick={handleReupload}>
-                        <Upload className="h-4 w-4 mr-2" />
-                        {t('common.upload')}
-                      </MenubarItem>
-                    </MenubarContent>
-                  </MenubarMenu>
-
-                  {/* 字幕菜单 */}
-                  <MenubarMenu>
-                    <MenubarTrigger
-                      className="h-8 px-3 py-1.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                      disabled={!hasActiveChunks}
-                    >
-                      <FileText className="h-4 w-4 mr-1.5" />
-                      <span className="hidden sm:inline">{t('components.subtitleEditor.title')}</span>
-                    </MenubarTrigger>
-                    <MenubarContent align="start" className="min-w-[160px]">
-                      <MenubarItem onClick={handleOpenSubtitleExportDialog}>
-                        <FileText className="h-4 w-4 mr-2" />
-                        {t('components.exportDialog.exportSubtitle')}
-                      </MenubarItem>
-                    </MenubarContent>
-                  </MenubarMenu>
-
-                  {/* 视频菜单 */}
-                  <MenubarMenu>
-                    <MenubarTrigger
-                      className="h-8 px-3 py-1.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                      disabled={!hasActiveChunks || stage !== 'edit' || isProcessing}
-                    >
-                      <Video className="h-4 w-4 mr-1.5" />
-                      <span className="hidden sm:inline">
-                        {isProcessing ? t('common.loading') : t('components.exportDialog.exportVideo')}
-                      </span>
-                    </MenubarTrigger>
-                    <MenubarContent align="start" className="min-w-[180px]">
-                      <MenubarItem onClick={handleOpenVideoExportDialog}>
-                        <Video className="h-4 w-4 mr-2" />
-                        {t('components.exportDialog.exportVideo')}
-                      </MenubarItem>
-                      <MenubarSeparator />
-                      <MenubarItem
-                        disabled={true}
-                        className="data-[disabled]:opacity-50"
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        {t('components.messageCenter.title')}
-                      </MenubarItem>
-                    </MenubarContent>
-                  </MenubarMenu>
-                </Menubar>
+                <input
+                  ref={uploadInputRef}
+                  type="file"
+                  accept="video/mp4,video/webm,video/quicktime,video/ogg,audio/mp3,audio/wav,audio/ogg,audio/m4a"
+                  className="hidden"
+                  onChange={handleNativeFileSelect}
+                />
+                <button
+                  onClick={() => uploadInputRef.current?.click()}
+                  className="flex w-full flex-col items-center justify-center rounded border border-dashed border-aimu-border bg-aimu-input px-3 py-4 text-center transition-colors hover:bg-aimu-hover"
+                >
+                  <Upload className="mb-2 h-5 w-5 text-aimu-text-muted" />
+                  <span className="text-xs font-medium text-aimu-text-primary">{t('components.workstation.dropFile')}</span>
+                  <span className="mt-1 text-[10px] leading-4 text-aimu-text-muted">{t('components.workstation.supportedFormatsShort')}</span>
+                </button>
+                <button
+                  type="button"
+                  className="mt-3 flex h-8 w-full items-center justify-center gap-2 rounded border border-aimu-coral/35 bg-aimu-red-bg text-xs font-medium text-aimu-coral hover:bg-aimu-coral/15"
+                  onClick={handleReupload}
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  {t('components.workstation.useMockTimeline')}
+                </button>
               </div>
             </div>
+            
+            <button onClick={handleOpenVideoExportDialog} className="flex items-center space-x-1.5 text-sm font-medium hover:text-primary transition-colors">
+              <Download className="w-4 h-4" />
+              <span>{t('components.workstation.export')}</span>
+            </button>
+            
+            <div className="h-4 w-px bg-border mx-2"></div>
+            
+            <div className="flex items-center space-x-3 text-muted-foreground">
+              <button className="hover:text-foreground transition-colors"><Undo2 className="w-4 h-4" /></button>
+              <button className="hover:text-foreground transition-colors"><Redo2 className="w-4 h-4" /></button>
+              <button className="hover:text-foreground transition-colors"><Keyboard className="w-4 h-4" /></button>
+            </div>
+          </div>
+
+          {/* RIGHT */}
+          <div className="flex items-center space-x-3 text-xs">
+            <a data-testid="github-link" href="https://github.com/x007xyz/flycut-caption" target="_blank" rel="noreferrer" className="flex items-center space-x-1.5 text-muted-foreground hover:text-foreground transition-colors font-medium px-2">
+              <Github className="w-3.5 h-3.5" />
+              <span>GitHub</span>
+            </a>
+            
+            <div className="h-4 w-px bg-border mx-1"></div>
+            
+            {mergedConfig.enableLanguageSelector !== false && (
+              <LanguageSelector
+                variant="minimal"
+                currentLanguage={language}
+                languages={languageOptions}
+                onLanguageChange={(newLanguage) => {
+                  setLanguage(newLanguage);
+                  if (onLanguageChange) {
+                    onLanguageChange(newLanguage);
+                  }
+                }}
+              />
+            )}
+
+            {mergedConfig.enableThemeToggle !== false && (
+              <ThemeToggle variant="button" />
+            )}
+            
+            <MessageCenterButton />
           </div>
         </header>
 
-        {/* 主要内容区域 - 动态布局 */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* 左侧面板 - 字幕编辑器和配置 */}
-          <div className="w-80 flex-shrink-0 bg-card shadow-sm">
-            {renderLeftPanel()}
-          </div>
+        {/* 主要内容区域 - Aimu 风格左右分栏 */}
+        <div className="flex-1 flex overflow-hidden bg-background">
+          <>
+              {/* 左侧：视频播放器 + 字幕设置 - 占 50% 宽度 */}
+              <div className="w-1/2 flex-shrink-0 flex flex-col border-r border-border bg-background overflow-hidden">
+                {/* 视频播放器区域 */}
+                <div className="relative flex-1 bg-aimu-input flex items-center justify-center overflow-hidden">
+                  {videoFile ? (
+                    <div className="w-full h-full aspect-video max-h-full">
+                      <EnhancedVideoPlayer
+                        ref={videoPlayerRef}
+                        videoUrl={videoFile.url}
+                        className="w-full h-full"
+                        onTimeUpdate={(time) => setCurrentTime(time)}
+                        subtitleStyle={subtitleStyle}
+                        onSubtitleStyleChange={setSubtitleStyle}
+                      />
+                    </div>
+                  ) : (
+                    <MockVideoPreview />
+                  )}
+                </div>
 
-          {/* 中间面板 - 视频播放器 */}
-          <div className="flex-1 flex flex-col bg-muted/10 h-full">
-            {renderRightPanel()}
-          </div>
+                {/* 视频下方：字幕设置与待办事项（Tabs 切换） */}
+                <div className="h-60 border-t border-border bg-card flex flex-col overflow-hidden">
+                  {/* Tab 头部 */}
+                  <div className="flex border-b border-border bg-muted/10 px-4">
+                    {tabOptions.map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={cn(
+                          'px-4 py-2 text-xs font-medium transition-colors',
+                          activeTab === tab.id
+                            ? 'bg-aimu-purple text-white'
+                            : 'text-muted-foreground hover:text-foreground'
+                        )}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
 
-          {/* 右侧面板 - 字幕设置 (仅在有字幕时显示) */}
-          {hasActiveChunks && (
-            <div className="w-80 flex-shrink-0 bg-card shadow-sm">
-              {renderSubtitleSettingsPanel()}
-            </div>
-          )}
+                  {/* Tab 内容 */}
+                  <div className="flex-1 overflow-y-auto p-4">
+                    {activeTab === 'style' ? (
+                      <div className="flex flex-col h-full space-y-4">
+                        {/* Shadow and Font selectors */}
+                        <div className="flex items-center space-x-6 text-sm">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-muted-foreground font-medium">{t('components.workstation.shadow')}:</span>
+                            <Select value={shadow} onValueChange={(val) => setShadow(val as ShadowSize)}>
+                              <SelectTrigger className="h-8 w-16 bg-background">
+                                <SelectValue placeholder="N" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="N">N</SelectItem>
+                                <SelectItem value="S">S</SelectItem>
+                                <SelectItem value="M">M</SelectItem>
+                                <SelectItem value="L">L</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="flex items-center space-x-2">
+                            <span className="text-muted-foreground font-medium">{t('components.workstation.font')}:</span>
+                            <Select value={font} onValueChange={(val) => setFont(val)}>
+                              <SelectTrigger className="h-8 w-56 bg-background">
+                                <SelectValue placeholder="Source Han Sans CN (Normal)" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Source Han Sans CN (Normal)">Source Han Sans CN (Normal)</SelectItem>
+                                <SelectItem value="Arial">Arial</SelectItem>
+                                <SelectItem value="Georgia">Georgia</SelectItem>
+                                <SelectItem value="Courier New">Courier New</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        
+                        <SubtitleSettings
+                          style={subtitleStyle}
+                          onStyleChange={setSubtitleStyle}
+                        />
+                      </div>
+                    ) : activeTab === 'tools' ? (
+                      <div className="space-y-2">
+                        <div className="text-xs text-muted-foreground font-medium mb-2">
+                          {t('components.workstation.plannedTools')}
+                        </div>
+                        {renderFeatureItems(plannedFeatures.tools)}
+                      </div>
+                    ) : activeTab === 'options' ? (
+                      <div className="space-y-2">
+                        <div className="text-xs text-muted-foreground font-medium mb-2">
+                          {t('components.workstation.plannedOptions')}
+                        </div>
+                        {renderFeatureItems(plannedFeatures.options)}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="text-xs text-muted-foreground font-medium mb-2">
+                          {t('components.workstation.plannedApi')}
+                        </div>
+                        {renderFeatureItems(plannedFeatures.api)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 右侧：字幕编辑器 (SubtitleList) - 占 50% 宽度 */}
+              <div className="flex-1 flex flex-col bg-background overflow-hidden">
+                {/* Subtitle list editor header */}
+                <div className="flex-shrink-0 p-2 border-b border-border bg-card flex items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs text-muted-foreground font-medium">{t('components.workstation.display')}:</span>
+                      <Select value={display} onValueChange={(val) => setDisplay(val as DisplayMode)}>
+                        <SelectTrigger className="h-7 w-28 text-xs bg-background">
+                          <SelectValue placeholder={t('components.workstation.displayBilingual')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Bilingual">{t('components.workstation.displayBilingual')}</SelectItem>
+                          <SelectItem value="Main">{t('components.workstation.displayMain')}</SelectItem>
+                          <SelectItem value="Second">{t('components.workstation.displaySecond')}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs text-muted-foreground font-medium">{t('components.workstation.translate')}:</span>
+                      <Select defaultValue="none">
+                        <SelectTrigger className="h-7 w-28 text-xs bg-background">
+                          <SelectValue placeholder={t('components.workstation.none')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">{t('components.workstation.none')}</SelectItem>
+                          <SelectItem value="en">{t('components.languageSelector.english')}</SelectItem>
+                          <SelectItem value="zh">{t('components.languageSelector.chinese')}</SelectItem>
+                          <SelectItem value="ja">{t('components.languageSelector.japanese')}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  
+                  <button className="flex items-center space-x-1.5 px-3 py-1 bg-primary text-primary-foreground rounded text-xs font-medium hover:opacity-90 transition-opacity">
+                    <Play className="w-3.5 h-3.5" />
+                    <span>{t('components.workstation.start')}</span>
+                  </button>
+                </div>
+
+                {/* Subtitle list */}
+                <div className="flex-1 overflow-hidden flex flex-col">
+                  {/* ASR 配置面板（如果还在 transcribe 阶段） */}
+                  {stage === 'transcribe' && (
+                    <div className="flex-shrink-0 p-4 border-b border-border bg-muted/5">
+                      <label className="text-sm font-medium mb-2 block">{t('components.asrPanel.language')}</label>
+                      <ASRPanel />
+                    </div>
+                  )}
+                  
+                  <div className="flex-1 overflow-hidden">
+                    <SubtitleList videoPlayerRef={videoPlayerRef} />
+                  </div>
+                </div>
+              </div>
+          </>
         </div>
+
+        <TimelineWaveform
+          currentTime={currentTime}
+          duration={timelineDuration}
+          chunks={chunks}
+          onSeek={handleTimelineSeek}
+        />
+
+        {/* 底部状态栏 - Aimu 风格 */}
+        <footer className="flex-shrink-0 h-7 border-t border-border bg-background px-4 flex items-center justify-between text-[11px] text-muted-foreground select-none">
+          <div className="flex items-center">
+            {t('components.workstation.tip')}
+          </div>
+          <div className="flex items-center gap-3 font-mono">
+            <div>{t('components.workstation.used')}: {memory.used}</div>
+            <div className="text-border">|</div>
+            <div>{t('components.workstation.allocated')}: {memory.allocated}</div>
+            <div className="text-border">|</div>
+            <div>{t('components.workstation.limit')}: {memory.limit}</div>
+          </div>
+        </footer>
 
         {/* 导出配置对话框 */}
         <ExportDialog

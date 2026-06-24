@@ -6,75 +6,171 @@
   to { transform: scaleX(0); }
 }
 
+/* ===== Aimu-app.com Pixel-Level Theme System ===== */
+/* Dark mode colors extracted directly from aimu-app.com computed styles */
+/* Light mode designed as a balanced inverse that preserves the same aesthetic */
+
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* === Light Mode === */
+  --radius: 0.25rem;
+
+  /* Core backgrounds - light equivalents of #0a0a0a / #141414 / #1e1e22 */
+  --background: #f5f5f7;
+  --foreground: #1a1a1e;
+
+  /* Panel backgrounds - light equivalents of #141414 / #1d1e23 */
+  --card: #ffffff;
+  --card-foreground: #1a1a1e;
+
+  /* Popover / overlay */
+  --popover: #ffffff;
+  --popover-foreground: #1a1a1e;
+
+  /* Primary - coral/red-orange (matching aimu slider accent #f56c6c) */
+  --primary: #e85555;
+  --primary-foreground: #ffffff;
+
+  /* Secondary - light grey panels (equivalent of #262727) */
+  --secondary: #e8e8ec;
+  --secondary-foreground: #4a4a52;
+
+  /* Muted - subtle backgrounds (equivalent of #303030) */
+  --muted: #ececf0;
+  --muted-foreground: #8d9095;
+
+  /* Accent - purple active states (matching aimu #5F33E1 / #1E1035) */
+  --accent: #ede8ff;
+  --accent-foreground: #5f33e1;
+
+  /* Destructive */
+  --destructive: #e85555;
+  --destructive-foreground: #ffffff;
+
+  /* Borders - light equivalents of #2c2e34 / #4c4d4f */
+  --border: #e0e0e6;
+  --input: #e0e0e6;
+  --ring: #e85555;
+
+  /* Aimu-specific tokens */
+  --aimu-bg-page: #f5f5f7;
+  --aimu-bg-panel: #ffffff;
+  --aimu-bg-input: #f0f0f4;
+  --aimu-bg-hover: #ececf0;
+  --aimu-bg-active: #ede8ff;
+  --aimu-border: #e0e0e6;
+  --aimu-border-light: #ececf0;
+  --aimu-text-primary: #1a1a1e;
+  --aimu-text-secondary: #5a5a62;
+  --aimu-text-muted: #8d9095;
+  --aimu-text-placeholder: #b0b0b8;
+  --aimu-accent-coral: #e85555;
+  --aimu-accent-purple: #5f33e1;
+  --aimu-accent-purple-bg: #ede8ff;
+  --aimu-accent-purple-bg-hover: #e0d7ff;
+  --aimu-accent-red-bg: #fce8e8;
+  --aimu-slider-track: #e85555;
+  --aimu-slider-handle: #ffffff;
+  --aimu-slider-handle-border: #e85555;
+  --aimu-toggle-on: #e85555;
+  --aimu-toggle-off: #d0d0d6;
+
+  /* Chart colors */
+  --chart-1: #e85555;
+  --chart-2: #5f33e1;
+  --chart-3: #2a598a;
+  --chart-4: #67c23a;
+  --chart-5: #e6a23c;
+
+  /* Sidebar */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1a1a1e;
+  --sidebar-primary: #5f33e1;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ececf0;
+  --sidebar-accent-foreground: #1a1a1e;
+  --sidebar-border: #e0e0e6;
+  --sidebar-ring: #e85555;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.269 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.371 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.439 0 0);
+  /* === Dark Mode (pixel-matched from aimu-app.com) === */
+
+  /* Core backgrounds - exact from aimu-app.com */
+  --background: #0a0a0a;
+  --foreground: #e5eaf3;
+
+  /* Panel backgrounds - #141414 from aimu */
+  --card: #141414;
+  --card-foreground: #e5eaf3;
+
+  /* Popover / overlay - #1d1e23 from aimu */
+  --popover: #1d1e23;
+  --popover-foreground: #e5eaf3;
+
+  /* Primary - coral/red-orange (#f56c6c from aimu Element Plus) */
+  --primary: #f56c6c;
+  --primary-foreground: #ffffff;
+
+  /* Secondary - #262727 from aimu */
+  --secondary: #262727;
+  --secondary-foreground: #cfd3dc;
+
+  /* Muted - #303030 from aimu */
+  --muted: #1d1d1d;
+  --muted-foreground: #8d9095;
+
+  /* Accent - purple active states (#5F33E1 / #1E1035 from aimu) */
+  --accent: #2d1a4a;
+  --accent-foreground: #c8b8ff;
+
+  /* Destructive - #f56c6c from aimu */
+  --destructive: #f56c6c;
+  --destructive-foreground: #ffffff;
+
+  /* Borders - #2c2e34 / #4c4d4f from aimu */
+  --border: #2c2e34;
+  --input: #2c2e34;
+  --ring: #f56c6c;
+
+  /* Aimu-specific tokens - exact from computed styles */
+  --aimu-bg-page: #0a0a0a;
+  --aimu-bg-panel: #141414;
+  --aimu-bg-input: #141414;
+  --aimu-bg-hover: #262727;
+  --aimu-bg-active: #2d1a4a;
+  --aimu-border: #2c2e34;
+  --aimu-border-light: #1d1d1d;
+  --aimu-text-primary: #e5eaf3;
+  --aimu-text-secondary: #a3a6ad;
+  --aimu-text-muted: #8d9095;
+  --aimu-text-placeholder: #6c6e72;
+  --aimu-accent-coral: #f56c6c;
+  --aimu-accent-purple: #5f33e1;
+  --aimu-accent-purple-bg: #2d1a4a;
+  --aimu-accent-purple-bg-hover: #3d2a5a;
+  --aimu-accent-red-bg: #582e2e;
+  --aimu-slider-track: #f56c6c;
+  --aimu-slider-handle: #ffffff;
+  --aimu-slider-handle-border: #f56c6c;
+  --aimu-toggle-on: #f56c6c;
+  --aimu-toggle-off: #39393a;
+
+  /* Chart colors */
+  --chart-1: #f56c6c;
+  --chart-2: #5f33e1;
+  --chart-3: #409eff;
+  --chart-4: #67c23a;
+  --chart-5: #e6a23c;
+
+  /* Sidebar */
+  --sidebar: #141414;
+  --sidebar-foreground: #e5eaf3;
+  --sidebar-primary: #5f33e1;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #262727;
+  --sidebar-accent-foreground: #e5eaf3;
+  --sidebar-border: #2c2e34;
+  --sidebar-ring: #f56c6c;
 }
 
 @theme inline {
@@ -110,9 +206,217 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Aimu-specific color tokens for Tailwind */
+  --color-aimu-panel: var(--aimu-bg-panel);
+  --color-aimu-input: var(--aimu-bg-input);
+  --color-aimu-hover: var(--aimu-bg-hover);
+  --color-aimu-active: var(--aimu-bg-active);
+  --color-aimu-border: var(--aimu-border);
+  --color-aimu-border-light: var(--aimu-border-light);
+  --color-aimu-text-primary: var(--aimu-text-primary);
+  --color-aimu-text-secondary: var(--aimu-text-secondary);
+  --color-aimu-text-muted: var(--aimu-text-muted);
+  --color-aimu-coral: var(--aimu-accent-coral);
+  --color-aimu-purple: var(--aimu-accent-purple);
+  --color-aimu-purple-bg: var(--aimu-accent-purple-bg);
+  --color-aimu-red-bg: var(--aimu-accent-red-bg);
 }
 
 html {
   color: var(--foreground);
-  /* background-color: var(--background); */
+  background-color: var(--background);
+  font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", Arial, sans-serif;
+}
+
+body {
+  margin: 0;
+  min-width: 1024px;
+  min-height: 100vh;
+  background: var(--background);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* === Aimu-style scrollbar === */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--aimu-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--aimu-text-muted);
+}
+
+/* === Aimu-style slider overrides === */
+.aimu-slider {
+  --aimu-slider-height: 4px;
+}
+
+.aimu-slider [role="slider"] {
+  background: var(--aimu-slider-handle);
+  border: 2px solid var(--aimu-slider-handle-border);
+  box-shadow: 0 0 0 0 transparent;
+}
+
+/* === Aimu-style toggle switch === */
+.aimu-toggle[data-state="checked"] {
+  background: var(--aimu-toggle-on);
+}
+
+.aimu-toggle[data-state="unchecked"] {
+  background: var(--aimu-toggle-off);
+}
+
+/* === Aimu-style tab === */
+.aimu-tab-active {
+  background: var(--aimu-accent-purple);
+  color: #ffffff;
+}
+
+/* === Aimu subtitle row active state === */
+.aimu-row-active {
+  background: var(--aimu-accent-purple-bg);
+}
+
+.mock-video-preview {
+  background: var(--aimu-bg-input);
+}
+
+.mock-video-preview-bg {
+  background:
+    radial-gradient(circle at 50% 22%, color-mix(in oklab, var(--aimu-accent-purple) 20%, transparent), transparent 36%),
+    linear-gradient(160deg, var(--aimu-bg-input) 0%, var(--aimu-bg-panel) 52%, var(--aimu-bg-hover) 100%);
+}
+
+.mock-video-frame {
+  border-color: var(--aimu-border);
+  background: color-mix(in oklab, var(--aimu-bg-panel) 82%, transparent);
+}
+
+.mock-video-grid {
+  background-image:
+    linear-gradient(90deg, color-mix(in oklab, var(--aimu-text-muted) 22%, transparent) 1px, transparent 1px),
+    linear-gradient(0deg, color-mix(in oklab, var(--aimu-text-muted) 18%, transparent) 1px, transparent 1px);
+}
+
+.mock-video-badge {
+  background: color-mix(in oklab, var(--aimu-bg-panel) 78%, transparent);
+  color: var(--aimu-text-secondary);
+}
+
+.mock-subtitle-primary {
+  background: color-mix(in oklab, var(--aimu-bg-panel) 88%, transparent);
+  color: var(--aimu-text-primary);
+}
+
+.mock-subtitle-secondary {
+  background: color-mix(in oklab, var(--aimu-bg-panel) 78%, transparent);
+  color: var(--aimu-text-secondary);
+}
+
+.mock-play-button {
+  background: color-mix(in oklab, var(--aimu-text-primary) 12%, transparent);
+  color: var(--aimu-text-primary);
+}
+
+.mock-play-button:hover {
+  background: color-mix(in oklab, var(--aimu-text-primary) 18%, transparent);
+}
+
+.mock-video-meta {
+  color: var(--aimu-text-secondary);
+}
+
+.aimu-floating-panel {
+  background: color-mix(in oklab, var(--aimu-bg-panel) 96%, transparent);
+  border-color: var(--aimu-border);
+  color: var(--aimu-text-primary);
+}
+
+.create-popover {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition:
+    opacity 150ms ease,
+    transform 150ms ease,
+    visibility 150ms ease;
+  visibility: hidden;
+}
+
+.create-menu::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 100%;
+  z-index: 49;
+  width: max(100%, 280px);
+  height: 1rem;
+  pointer-events: none;
+}
+
+.create-menu:hover::after,
+.create-menu:focus-within::after {
+  pointer-events: auto;
+}
+
+.create-menu:hover .create-popover,
+.create-menu:focus-within .create-popover {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+  visibility: visible;
+}
+
+.aimu-compact-upload > div {
+  border-width: 1px;
+  border-radius: 4px;
+  padding: 14px;
+  min-height: 0;
+  background: var(--aimu-bg-input);
+}
+
+.aimu-compact-upload svg {
+  width: 18px;
+  height: 18px;
+  margin-bottom: 6px;
+}
+
+.aimu-compact-upload p:first-of-type {
+  margin-bottom: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.aimu-compact-upload p:nth-of-type(2) {
+  margin-bottom: 8px;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.aimu-compact-upload button {
+  margin-top: 8px;
+  height: 28px;
+  border-radius: 4px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+/* === Font utility === */
+.font-aimu {
+  font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", Arial, sans-serif;
 }

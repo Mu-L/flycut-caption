@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useThemeStore } from '@/stores/themeStore';
 
 export function ThemeInitializer() {
-  const { theme, resolvedTheme, setTheme } = useThemeStore();
+  const { resolvedTheme, setTheme } = useThemeStore();
 
   useEffect(() => {
     // 确保主题正确应用到 DOM

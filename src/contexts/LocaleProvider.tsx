@@ -39,19 +39,19 @@ interface LocaleProviderProps {
 }
 
 // 获取嵌套对象的值
-function getNestedValue(obj: any, path: string): string {
+function getNestedValue(obj: unknown, path: string): string | undefined {
   const keys = path.split('.');
   let result = obj;
 
   for (const key of keys) {
     if (result && typeof result === 'object' && key in result) {
-      result = result[key];
+      result = (result as Record<string, unknown>)[key];
     } else {
-      return path; // 如果找不到，返回原始路径作为备用
+      return undefined;
     }
   }
 
-  return typeof result === 'string' ? result : path;
+  return typeof result === 'string' ? result : undefined;
 }
 
 export function LocaleProvider({
@@ -111,7 +111,9 @@ export function LocaleProvider({
 
   // 翻译函数
   const t = useCallback((path: string): string => {
-    return getNestedValue(currentLocale, path);
+    return getNestedValue(currentLocale, path) ??
+      getNestedValue(defaultLocale, path) ??
+      path;
   }, [currentLocale]);
 
   const contextValue: LocaleContextType = {

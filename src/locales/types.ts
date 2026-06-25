@@ -299,6 +299,13 @@ export interface FlyCutCaptionLocale {
       offset: string;
       bold: string;
       italic: string;
+      correctSubtitle: string;
+      correctStart: string;
+      translateStart: string;
+      correcting: string;
+      translating: string;
+      aiRunning: string;
+      selectModelFirst: string;
     };
     languageSelector: {
       language: string;
@@ -314,6 +321,25 @@ export interface FlyCutCaptionLocale {
       russian: string;
       arabic: string;
       hindi: string;
+    };
+    aiSettings: {
+      title: string;
+      description: string;
+      addModel: string;
+      editModel: string;
+      name: string;
+      baseUrl: string;
+      apiKey: string;
+      model: string;
+      temperature: string;
+      selectModel: string;
+      noModel: string;
+      delete: string;
+      save: string;
+      cancel: string;
+      apiKeyHint: string;
+      useThisModel: string;
+      emptyTip: string;
     };
   };
   messages: {

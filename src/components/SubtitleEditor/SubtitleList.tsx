@@ -5,11 +5,20 @@ import { cn } from '@/lib/utils';
 import { useHistoryStore, useChunks, useHistoryText, useHistoryLanguage, useHistoryDuration, useCanUndo, useCanRedo, useUndo, useRedo } from '@/stores/historyStore';
 import { useAppStore } from '@/stores/appStore';
 import { isTimeInRange } from '@/utils/timeUtils';
-import { FileText, Trash2, RotateCcw, Undo, Redo, ArrowLeftRight, Languages, Loader2, Mic, AlertCircle } from 'lucide-react';
+import { FileText, Trash2, RotateCcw, Undo, Redo, ArrowLeftRight, Languages, Loader2, Mic, AlertCircle, Wand2 } from 'lucide-react';
 import { SubtitleItem } from './SubtitleItem';
 import type { EnhancedVideoPlayerRef } from '@/components/VideoPlayer/EnhancedVideoPlayer';
 import { useTranslation } from '@/contexts/LocaleProvider';
 import type { ASRProgress } from '@/types/subtitle';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { COMMON_LANGUAGES } from '@/constants/languages';
+import { useAI } from '@/hooks/useAI';
 
 interface SubtitleListProps {
   className?: string;
@@ -57,10 +66,16 @@ export function SubtitleList({
   const currentTime = useAppStore(state => state.currentTime);
   const displayMode = useAppStore(state => state.display);
   const setDisplayMode = useAppStore(state => state.setDisplay);
-  
+  const aiModels = useAppStore(state => state.aiModels);
+  const selectedAIModelId = useAppStore(state => state.selectedAIModelId);
+  const setSelectedAIModelId = useAppStore(state => state.setSelectedAIModelId);
+
+  const { isAILoading, aiProgress, hasModels, runCorrection, runTranslation } = useAI();
+  const [targetLang, setTargetLang] = useState<string>('en');
+
   const deleteSelected = useHistoryStore(state => state.deleteSelected);
   const restoreSelected = useHistoryStore(state => state.restoreSelected);
-  
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const seekTo = (time: number) => {
@@ -226,14 +241,87 @@ export function SubtitleList({
           <ArrowLeftRight className="w-4 h-4" />
         </button>
 
-        {/* RIGHT: Translation language dropdown + Start button */}
+        {/* RIGHT: AI model + target language + correct + translate */}
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 px-2 py-1 border border-aimu-border rounded text-xs text-aimu-text-secondary cursor-not-allowed opacity-70">
-            <Languages className="w-3.5 h-3.5" />
-            <span>{t('components.languageSelector.selectLanguage')}</span>
-          </div>
-          <button disabled className="px-3 py-1 text-xs bg-aimu-red-bg text-aimu-coral rounded opacity-50 cursor-not-allowed font-medium">
-            {t('components.workstation.start')}
+          {/* AI 模型选择 */}
+          <Select
+            value={selectedAIModelId ?? ''}
+            onValueChange={(v) => setSelectedAIModelId(v || null)}
+            disabled={isAILoading}
+          >
+            <SelectTrigger className="h-7 w-28 text-xs bg-aimu-input border-aimu-border">
+              <SelectValue placeholder={t('components.aiSettings.selectModel')} />
+            </SelectTrigger>
+            <SelectContent>
+              {!hasModels ? (
+                <SelectItem value="__none" disabled>
+                  {t('components.aiSettings.noModel')}
+                </SelectItem>
+              ) : (
+                aiModels.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name}
+                  </SelectItem>
+                ))
+              )}
+            </SelectContent>
+          </Select>
+
+          {/* 目标语言 */}
+          <Select value={targetLang} onValueChange={setTargetLang} disabled={isAILoading}>
+            <SelectTrigger className="h-7 w-24 text-xs bg-aimu-input border-aimu-border">
+              <div className="flex items-center gap-1">
+                <Languages className="w-3.5 h-3.5" />
+                <SelectValue />
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              {COMMON_LANGUAGES.map((lang) => (
+                <SelectItem key={lang.code} value={lang.code}>
+                  {lang.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* 纠错 */}
+          <button
+            onClick={runCorrection}
+            disabled={isAILoading || !selectedAIModelId}
+            className={cn(
+              'flex items-center gap-1 px-2.5 py-1 text-xs rounded font-medium transition-colors',
+              isAILoading
+                ? 'bg-aimu-purple/50 text-white cursor-not-allowed'
+                : 'bg-aimu-purple text-white hover:bg-aimu-purple/90 disabled:opacity-40 disabled:cursor-not-allowed',
+            )}
+            title={t('components.workstation.correctSubtitle')}
+          >
+            {isAILoading && aiProgress?.data ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Wand2 className="w-3.5 h-3.5" />
+            )}
+            <span>{isAILoading ? t('components.workstation.correcting') : t('components.workstation.correctStart')}</span>
+          </button>
+
+          {/* 翻译 */}
+          <button
+            onClick={() => runTranslation(targetLang)}
+            disabled={isAILoading || !selectedAIModelId}
+            className={cn(
+              'flex items-center gap-1 px-2.5 py-1 text-xs rounded font-medium transition-colors',
+              isAILoading
+                ? 'bg-aimu-red-bg/70 text-aimu-coral cursor-not-allowed'
+                : 'bg-aimu-red-bg text-aimu-coral hover:bg-aimu-red-bg/80 disabled:opacity-40 disabled:cursor-not-allowed',
+            )}
+            title={t('components.workstation.translateStart')}
+          >
+            {isAILoading ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Languages className="w-3.5 h-3.5" />
+            )}
+            <span>{isAILoading ? t('components.workstation.translating') : t('components.workstation.translateStart')}</span>
           </button>
         </div>
       </div>

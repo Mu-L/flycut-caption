@@ -14,14 +14,21 @@ interface UpdateAction {
   next: Partial<Chunk>;
 }
 
+interface BatchUpdateAction {
+  type: "batch";
+  updates: { id: string; prev: Partial<Chunk>; next: Partial<Chunk> }[];
+}
+
+type HistoryAction = UpdateAction | BatchUpdateAction;
+
 interface HistoryState {
   // 字幕数据
   chunks: Chunk[];
   language: string;
   
   // 历史记录
-  undoStack: UpdateAction[];
-  redoStack: UpdateAction[];
+  undoStack: HistoryAction[];
+  redoStack: HistoryAction[];
   lastUpdateTime: number;
   mergeThreshold: number; // 连续操作合并阈值（毫秒）
 
@@ -49,7 +56,10 @@ interface HistoryActions {
   
   // 编辑字幕文本
   updateChunkText: (chunkId: string, newText: string) => void;
-  
+
+  // 批量更新多个 chunk 的 text/secondText（整批作为一次 undo）
+  batchUpdateText: (updates: { id: string; text?: string; secondText?: string }[]) => void;
+
   // 重置
   reset: () => void;
 }
@@ -136,7 +146,7 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
         const newChunks = [...state.chunks];
         newChunks[chunkIndex] = updatedChunk;
 
-        let newUndoStack: UpdateAction[];
+        let newUndoStack: HistoryAction[];
         const newRedoStack: UpdateAction[] = [];
         const newLastUpdateTime = now;
 
@@ -190,15 +200,25 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
         if (state.undoStack.length === 0) return;
 
         const action = state.undoStack[state.undoStack.length - 1];
-        const chunkIndex = state.chunks.findIndex(c => c.id === action.id);
-        if (chunkIndex === -1) return;
-
-        // 恢复之前的状态
-        const chunk = state.chunks[chunkIndex];
-        const restoredChunk = { ...chunk, ...action.prev };
         const newChunks = [...state.chunks];
-        newChunks[chunkIndex] = restoredChunk;
-        
+
+        if (action.type === "update") {
+          const chunkIndex = newChunks.findIndex(c => c.id === action.id);
+          if (chunkIndex !== -1) {
+            const chunk = newChunks[chunkIndex];
+            newChunks[chunkIndex] = { ...chunk, ...action.prev };
+          }
+        } else {
+          // batch
+          for (const u of action.updates) {
+            const chunkIndex = newChunks.findIndex(c => c.id === u.id);
+            if (chunkIndex !== -1) {
+              const chunk = newChunks[chunkIndex];
+              newChunks[chunkIndex] = { ...chunk, ...u.prev };
+            }
+          }
+        }
+
         // 移动到redo栈
         const newUndoStack = state.undoStack.slice(0, -1);
         const newRedoStack = [...state.redoStack, action];
@@ -223,15 +243,25 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
         if (state.redoStack.length === 0) return;
 
         const action = state.redoStack[state.redoStack.length - 1];
-        const chunkIndex = state.chunks.findIndex(c => c.id === action.id);
-        if (chunkIndex === -1) return;
-
-        // 应用操作
-        const chunk = state.chunks[chunkIndex];
-        const updatedChunk = { ...chunk, ...action.next };
         const newChunks = [...state.chunks];
-        newChunks[chunkIndex] = updatedChunk;
-        
+
+        if (action.type === "update") {
+          const chunkIndex = newChunks.findIndex(c => c.id === action.id);
+          if (chunkIndex !== -1) {
+            const chunk = newChunks[chunkIndex];
+            newChunks[chunkIndex] = { ...chunk, ...action.next };
+          }
+        } else {
+          // batch
+          for (const u of action.updates) {
+            const chunkIndex = newChunks.findIndex(c => c.id === u.id);
+            if (chunkIndex !== -1) {
+              const chunk = newChunks[chunkIndex];
+              newChunks[chunkIndex] = { ...chunk, ...u.next };
+            }
+          }
+        }
+
         // 移动回undo栈
         const newUndoStack = [...state.undoStack, action];
         const newRedoStack = state.redoStack.slice(0, -1);
@@ -351,34 +381,78 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
         const state = get();
         const newChunks = [...state.chunks];
         const now = Date.now();
-        
+
         const chunkIndex = newChunks.findIndex(c => c.id === chunkId);
         if (chunkIndex === -1) {
           console.warn('找不到指定的字幕片段:', chunkId);
           return;
         }
-        
+
         const chunk = newChunks[chunkIndex];
         const trimmedText = newText.trim();
-        
+
         // 如果文本没有变化，不需要更新
         if (chunk.text === trimmedText) {
           return;
         }
-        
+
         const action: UpdateAction = {
           type: "update",
           id: chunkId,
           prev: { text: chunk.text },
           next: { text: trimmedText }
         };
-        
+
         // 更新chunk文本
         newChunks[chunkIndex] = { ...chunk, text: trimmedText };
-        
+
         // 重新计算衍生状态
         const derived = computeDerivedState(newChunks);
-        
+
+        set({
+          chunks: newChunks,
+          undoStack: [...state.undoStack, action],
+          redoStack: [],
+          lastUpdateTime: now,
+          text: derived.text,
+          duration: derived.duration,
+          canUndo: true,
+          canRedo: false,
+        });
+      },
+
+      // 批量更新多个 chunk 的 text/secondText（整批作为一次 undo）
+      batchUpdateText: (updates) => {
+        const state = get();
+        if (updates.length === 0) return;
+        const newChunks = [...state.chunks];
+        const now = Date.now();
+        const batchUpdates: { id: string; prev: Partial<Chunk>; next: Partial<Chunk> }[] = [];
+
+        for (const u of updates) {
+          const chunkIndex = newChunks.findIndex(c => c.id === u.id);
+          if (chunkIndex === -1) continue;
+          const chunk = newChunks[chunkIndex];
+          const next: Partial<Chunk> = {};
+          const prev: Partial<Chunk> = {};
+          if (u.text !== undefined && u.text !== chunk.text) {
+            next.text = u.text;
+            prev.text = chunk.text;
+          }
+          if (u.secondText !== undefined && u.secondText !== chunk.secondText) {
+            next.secondText = u.secondText;
+            prev.secondText = chunk.secondText;
+          }
+          if (Object.keys(next).length === 0) continue;
+          batchUpdates.push({ id: u.id, prev, next });
+          newChunks[chunkIndex] = { ...chunk, ...next };
+        }
+
+        if (batchUpdates.length === 0) return;
+
+        const action: BatchUpdateAction = { type: "batch", updates: batchUpdates };
+        const derived = computeDerivedState(newChunks);
+
         set({
           chunks: newChunks,
           undoStack: [...state.undoStack, action],
@@ -416,6 +490,7 @@ export const useClearHistory = () => useHistoryStore(state => state.clearHistory
 export const useDeleteSelected = () => useHistoryStore(state => state.deleteSelected);
 export const useRestoreSelected = () => useHistoryStore(state => state.restoreSelected);
 export const useUpdateChunkText = () => useHistoryStore(state => state.updateChunkText);
+export const useBatchUpdateText = () => useHistoryStore(state => state.batchUpdateText);
 export const useResetHistory = () => useHistoryStore(state => state.reset);
 
 // 获取所有chunks（在组件中使用 useMemo 过滤）

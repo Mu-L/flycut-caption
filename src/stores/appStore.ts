@@ -9,6 +9,7 @@ import type {
 } from '@/types/video'
 import type { ASRProgress } from '@/types/subtitle'
 import type { ASREngineType } from '@/services/asrService'
+import type { AIModelConfig, AIProgress } from '@/types/ai'
 import { hasWebGPU } from '@/utils/audioUtils'
 
 // 应用状态接口
@@ -40,6 +41,12 @@ export interface AppState {
   shadow: 'N' | 'S' | 'M' | 'L'
   font: string
   display: 'Bilingual' | 'Main' | 'Second'
+
+  // AI 模型设置（字幕纠错 / 翻译）
+  aiModels: AIModelConfig[]
+  selectedAIModelId: string | null
+  aiProgress: AIProgress | null
+  aiTask: 'correction' | 'translation' | null
 }
 
 // 应用动作接口
@@ -70,9 +77,18 @@ export interface AppActions {
 
   // Aimu 风格设置管理
   setShadow: (shadow: AppState['shadow']) => void
-  setFont: (font: AppState['font']) => void
+  setFont: (font: string) => void
   setDisplay: (display: AppState['display']) => void
-  
+
+  // AI 模型管理
+  addAIModel: (model: Omit<AIModelConfig, 'id'>) => string
+  updateAIModel: (id: string, patch: Partial<Omit<AIModelConfig, 'id'>>) => void
+  removeAIModel: (id: string) => void
+  setSelectedAIModelId: (id: string | null) => void
+  setAIProgress: (progress: AIProgress) => void
+  clearAIProgress: () => void
+  setAITask: (task: AppState['aiTask']) => void
+
   // 重置
   reset: () => void
   
@@ -115,6 +131,11 @@ const initialState: AppState = {
   shadow: 'N',
   font: 'Source Han Sans CN (Normal)',
   display: 'Bilingual',
+
+  aiModels: [],
+  selectedAIModelId: null,
+  aiProgress: null,
+  aiTask: null,
 }
 
 // 创建Store
@@ -245,13 +266,67 @@ export const useAppStore = create<AppState & AppActions>()(
           ...state,
           font
         })),
-      
+
       setDisplay: (display) =>
         set((state) => ({
           ...state,
           display
         })),
-      
+
+      // AI 模型管理
+      addAIModel: (model) => {
+        const id = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+          ? crypto.randomUUID()
+          : `ai_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+        set((state) => ({
+          ...state,
+          aiModels: [...state.aiModels, { ...model, id }],
+          selectedAIModelId: state.selectedAIModelId ?? id,
+        }))
+        return id
+      },
+
+      updateAIModel: (id, patch) =>
+        set((state) => ({
+          ...state,
+          aiModels: state.aiModels.map((m) => (m.id === id ? { ...m, ...patch } : m)),
+        })),
+
+      removeAIModel: (id) =>
+        set((state) => {
+          const aiModels = state.aiModels.filter((m) => m.id !== id)
+          const selectedAIModelId =
+            state.selectedAIModelId === id
+              ? (aiModels[0]?.id ?? null)
+              : state.selectedAIModelId
+          return { ...state, aiModels, selectedAIModelId }
+        }),
+
+      setSelectedAIModelId: (id) =>
+        set((state) => ({
+          ...state,
+          selectedAIModelId: id,
+        })),
+
+      setAIProgress: (progress) =>
+        set((state) => ({
+          ...state,
+          aiProgress: progress,
+        })),
+
+      clearAIProgress: () =>
+        set((state) => ({
+          ...state,
+          aiProgress: null,
+          aiTask: null,
+        })),
+
+      setAITask: (aiTask) =>
+        set((state) => ({
+          ...state,
+          aiTask,
+        })),
+
       // 重置
       reset: () =>
         set((state) => ({
@@ -290,6 +365,8 @@ export const useAppStore = create<AppState & AppActions>()(
         shadow: state.shadow,
         font: state.font,
         display: state.display,
+        aiModels: state.aiModels,
+        selectedAIModelId: state.selectedAIModelId,
       }),
     }
     ),

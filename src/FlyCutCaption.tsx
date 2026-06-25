@@ -11,6 +11,7 @@ import type { EnhancedVideoPlayerRef } from '@/components/VideoPlayer/EnhancedVi
 import { SubtitleList } from '@/components/SubtitleEditor/SubtitleList';
 import { useASR } from '@/hooks/useASR';
 import { ASRSettingsPanel } from '@/components/ProcessingPanel/ASRSettingsPanel';
+import { AISettingsPanel } from '@/components/AISettingsPanel';
 import { SettingsDialog } from '@/components/ProcessingPanel/SettingsDialog';
 import { ExportDialog, type VideoExportOptions } from '@/components/ExportPanel/ExportDialog';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -1136,12 +1137,7 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
                     ) : activeTab === 'options' ? (
                       <ASRSettingsPanel onOpenSettings={() => setSettingsOpen(true)} />
                     ) : (
-                      <div className="space-y-2">
-                        <div className="text-xs text-muted-foreground font-medium mb-2">
-                          {t('components.workstation.plannedApi')}
-                        </div>
-                        {renderFeatureItems(plannedFeatures.api)}
-                      </div>
+                      <AISettingsPanel />
                     )}
                   </div>
                 </div>

@@ -47,6 +47,9 @@ export interface AppState {
   selectedAIModelId: string | null
   aiProgress: AIProgress | null
   aiTask: 'correction' | 'translation' | null
+
+  // 智能剪切空白段设置
+  smartCutSilenceThreshold: number // 秒，超过此时长的空白段将被标记裁剪
 }
 
 // 应用动作接口
@@ -88,6 +91,9 @@ export interface AppActions {
   setAIProgress: (progress: AIProgress) => void
   clearAIProgress: () => void
   setAITask: (task: AppState['aiTask']) => void
+
+  // 智能剪切空白段设置
+  setSmartCutSilenceThreshold: (threshold: number) => void
 
   // 重置
   reset: () => void
@@ -136,6 +142,8 @@ const initialState: AppState = {
   selectedAIModelId: null,
   aiProgress: null,
   aiTask: null,
+
+  smartCutSilenceThreshold: 1.5,
 }
 
 // 创建Store
@@ -327,6 +335,12 @@ export const useAppStore = create<AppState & AppActions>()(
           aiTask,
         })),
 
+      setSmartCutSilenceThreshold: (threshold) =>
+        set((state) => ({
+          ...state,
+          smartCutSilenceThreshold: threshold,
+        })),
+
       // 重置
       reset: () =>
         set((state) => ({
@@ -367,6 +381,7 @@ export const useAppStore = create<AppState & AppActions>()(
         display: state.display,
         aiModels: state.aiModels,
         selectedAIModelId: state.selectedAIModelId,
+        smartCutSilenceThreshold: state.smartCutSilenceThreshold,
       }),
     }
     ),

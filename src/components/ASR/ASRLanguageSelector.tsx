@@ -107,26 +107,26 @@ export function ASRLanguageSelector({
         onClick={handleToggleOpen}
         disabled={disabled}
         className={cn(
-          'w-full flex items-center justify-between gap-2 px-3 py-2',
+          'w-full flex items-center justify-between gap-2 px-3 py-1.5 h-8',
           'border border-gray-300 dark:border-gray-600 rounded-md',
-          'bg-background text-foreground',
+          'bg-background text-foreground text-sm',
           'hover:bg-gray-50 dark:hover:bg-gray-700',
           'focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
-          'disabled:opacity-50 disabled:cursor-not-allowed',
+          'disabled:opacity-50 disabled:-not-allowed',
           'transition-colors duration-200',
           {
             'ring-2 ring-blue-500 border-blue-500': isOpen,
           }
         )}
       >
-        <div className="flex items-center gap-2 min-w-0">
-          <Globe className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-          <span className="text-left break-words leading-tight">{currentLanguageName}</span>
+        <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+          <Globe className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+          <span className="truncate text-left">{currentLanguageName}</span>
         </div>
         
         <ChevronDown 
           className={cn(
-            'w-4 h-4 text-muted-foreground transition-transform duration-200 flex-shrink-0',
+            'w-3.5 h-3.5 text-muted-foreground transition-transform duration-200 flex-shrink-0',
             { 'rotate-180': isOpen }
           )} 
         />
@@ -137,13 +137,13 @@ export function ASRLanguageSelector({
         <div className={cn(
           'absolute top-full left-0 right-0 z-50 mt-1',
           'bg-popover border border-border',
-          'rounded-md shadow-lg max-h-80 overflow-hidden',
+          'rounded-md shadow-lg max-h-64 overflow-hidden',
           'animate-in fade-in-0 zoom-in-95 duration-200'
         )}>
           {/* 搜索框 */}
-          <div className="p-2 border-b border-gray-200 dark:border-gray-700">
+          <div className="p-1.5 border-b border-gray-200 dark:border-gray-700">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <input
                 ref={inputRef}
                 type="text"
@@ -151,9 +151,9 @@ export function ASRLanguageSelector({
                 onChange={handleSearchChange}
                 placeholder={placeholder}
                 className={cn(
-                  'w-full pl-10 pr-3 py-2 text-sm',
+                  'w-full pl-8 pr-2 py-1.5 text-xs',
                   'bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600',
-                  'rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
+                  'rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
                   'placeholder-gray-400 dark:placeholder-gray-500'
                 )}
               />
@@ -161,14 +161,14 @@ export function ASRLanguageSelector({
           </div>
 
           {/* 语言选项列表 */}
-          <div className="max-h-60 overflow-y-auto">
+          <div className="max-h-48 overflow-y-auto">
             {filteredLanguages.length > 0 ? (
               filteredLanguages.map(({ code, name }) => (
                 <button
                   key={code}
                   onClick={() => handleLanguageSelect(code)}
                   className={cn(
-                    'w-full flex items-center justify-between px-3 py-2 text-left',
+                    'w-full flex items-center justify-between px-3 py-1.5 text-left text-sm',
                     'hover:bg-gray-50 dark:hover:bg-gray-700',
                     'focus:bg-gray-50 dark:focus:bg-gray-700',
                     'transition-colors duration-150',
@@ -177,22 +177,22 @@ export function ASRLanguageSelector({
                     }
                   )}
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className="text-xs font-mono text-muted-foreground w-6 flex-shrink-0">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="text-[11px] font-mono text-muted-foreground w-5 flex-shrink-0">
                       {code}
                     </span>
-                    <span className="truncate">{name}</span>
+                    <span className="truncate text-xs">{name}</span>
                   </div>
                   
                   {code === language && (
-                    <Check className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                    <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
                   )}
                 </button>
               ))
             ) : (
-              <div className="px-3 py-4 text-center text-muted-foreground">
-                <Search className="w-8 h-8 mx-auto mb-2 text-muted-foreground/50" />
-                <p className="text-sm">未找到匹配的语言</p>
+              <div className="px-3 py-3 text-center text-muted-foreground">
+                <Search className="w-6 h-6 mx-auto mb-1.5 text-muted-foreground/50" />
+                <p className="text-xs">未找到匹配的语言</p>
               </div>
             )}
           </div>

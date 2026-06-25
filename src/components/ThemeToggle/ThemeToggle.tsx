@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { useTranslation } from '@/contexts/LocaleProvider';
+import { cn } from '@/lib/utils';
 
 interface ThemeToggleProps {
   variant?: 'select' | 'button';
@@ -69,13 +70,13 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({
 
   return (
     <Button
-      variant="outline"
+      variant="ghost"
       size="icon"
       onClick={toggleTheme}
-      className={className}
+      className={cn("size-7", className)}
       title={`${t('components.themeToggle.currentTheme')}: ${currentOption ? t(currentOption.labelKey) : t('components.themeToggle.auto')}`}
     >
-      <Icon className="h-4 w-4" />
+      <Icon className="h-3.5 w-3.5" />
       <span className="sr-only">{t('components.themeToggle.toggleTheme')}</span>
     </Button>
   );

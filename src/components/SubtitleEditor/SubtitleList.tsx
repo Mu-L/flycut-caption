@@ -1,15 +1,16 @@
 // 字幕列表组件
 
-import { useMemo, useState, type RefObject } from 'react';
+import { useCallback, useMemo, useState, type RefObject } from 'react';
 import { cn } from '@/lib/utils';
 import { useHistoryStore, useChunks, useHistoryText, useHistoryLanguage, useHistoryDuration, useCanUndo, useCanRedo, useUndo, useRedo } from '@/stores/historyStore';
 import { useAppStore } from '@/stores/appStore';
-import { isTimeInRange } from '@/utils/timeUtils';
+import { isTimeInRange, calculateBlankSegments } from '@/utils/timeUtils';
 import { FileText, Trash2, RotateCcw, Undo, Redo, ArrowLeftRight, Languages, Loader2, Mic, AlertCircle, Wand2 } from 'lucide-react';
 import { SubtitleItem } from './SubtitleItem';
 import type { EnhancedVideoPlayerRef } from '@/components/VideoPlayer/EnhancedVideoPlayer';
 import { useTranslation } from '@/contexts/LocaleProvider';
 import type { ASRProgress } from '@/types/subtitle';
+import { toast } from 'sonner';
 import {
   Select,
   SelectContent,
@@ -64,6 +65,7 @@ export function SubtitleList({
   );
   
   const currentTime = useAppStore(state => state.currentTime);
+  const setCurrentTime = useAppStore(state => state.setCurrentTime);
   const displayMode = useAppStore(state => state.display);
   const setDisplayMode = useAppStore(state => state.setDisplay);
   const aiModels = useAppStore(state => state.aiModels);
@@ -75,31 +77,44 @@ export function SubtitleList({
 
   const deleteSelected = useHistoryStore(state => state.deleteSelected);
   const restoreSelected = useHistoryStore(state => state.restoreSelected);
+  const insertBlankChunks = useHistoryStore(state => state.insertBlankChunks);
+
+  const smartCutSilenceThreshold = useAppStore(state => state.smartCutSilenceThreshold);
+  const videoDuration = useAppStore(state => state.videoPlayerState.duration);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  const seekTo = (time: number) => {
-    if (videoPlayerRef?.current) {
-      videoPlayerRef.current.seekTo(time);
-    }
-  };
+  const seekTo = useCallback((time: number) => {
+    setCurrentTime(time);
+    videoPlayerRef.current?.seekTo(time);
+  }, [setCurrentTime]);
 
   const currentChunk = useMemo(() => {
-    return transcript.chunks.find(chunk =>
-      isTimeInRange(currentTime, chunk.timestamp)
-    ) || null;
+    let result = null;
+    for (const chunk of transcript.chunks) {
+      if (isTimeInRange(currentTime, chunk.timestamp)) {
+        // 边界处优先选择后一段（start 更大的），避免相邻字幕共享时间点时高亮不切换
+        if (!result || chunk.timestamp[0] > result.timestamp[0]) {
+          result = chunk;
+        }
+      }
+    }
+    return result;
   }, [transcript.chunks, currentTime]);
 
   const statistics = useMemo(() => {
-    const deletedChunks = transcript.chunks.filter(chunk => chunk.deleted);
-    const activeCount = activeChunks.length;
+    const realChunks = transcript.chunks.filter(chunk => !chunk.isBlankSpacer);
+    const deletedChunks = realChunks.filter(chunk => chunk.deleted);
+    const activeCount = realChunks.filter(chunk => !chunk.deleted).length;
     const deletedCount = deletedChunks.length;
-    const totalCount = transcript.chunks.length;
+    const blankCount = transcript.chunks.filter(chunk => chunk.isBlankSpacer).length;
+    const totalCount = realChunks.length;
 
     return {
       totalCount,
       activeCount,
       deletedCount,
+      blankCount,
     };
   }, [transcript.chunks, activeChunks]);
 
@@ -132,12 +147,26 @@ export function SubtitleList({
   const handleRestoreDeleted = () => {
     const deletedIds = new Set(
       transcript.chunks
-        .filter(chunk => chunk.deleted)
+        .filter(chunk => chunk.deleted && !chunk.isBlankSpacer)
         .map(chunk => chunk.id)
     );
     if (deletedIds.size > 0) {
       restoreSelected(deletedIds);
     }
+  };
+
+  const handleSmartCutBlank = () => {
+    const segments = calculateBlankSegments(transcript.chunks, smartCutSilenceThreshold, videoDuration);
+    if (segments.length === 0) {
+      toast.info(t('components.workstation.smartCutEmpty'));
+      return;
+    }
+    // 计算节省时长
+    const totalBlank = segments.reduce((acc, seg) => acc + (seg.end - seg.start), 0);
+    insertBlankChunks(segments);
+    toast.success(t('components.workstation.smartCutDone')
+      .replace('{count}', String(segments.length))
+      .replace('{seconds}', totalBlank.toFixed(1)));
   };
 
   // ASR 识别中：在字幕编辑器内展示加载状态
@@ -242,14 +271,14 @@ export function SubtitleList({
         </button>
 
         {/* RIGHT: AI model + target language + correct + translate */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {/* AI 模型选择 */}
           <Select
             value={selectedAIModelId ?? ''}
             onValueChange={(v) => setSelectedAIModelId(v || null)}
             disabled={isAILoading}
           >
-            <SelectTrigger className="h-7 w-28 text-xs bg-aimu-input border-aimu-border">
+            <SelectTrigger className="h-6 w-24 text-xs bg-aimu-input border-aimu-border">
               <SelectValue placeholder={t('components.aiSettings.selectModel')} />
             </SelectTrigger>
             <SelectContent>
@@ -269,9 +298,9 @@ export function SubtitleList({
 
           {/* 目标语言 */}
           <Select value={targetLang} onValueChange={setTargetLang} disabled={isAILoading}>
-            <SelectTrigger className="h-7 w-24 text-xs bg-aimu-input border-aimu-border">
+            <SelectTrigger className="h-6 w-20 text-xs bg-aimu-input border-aimu-border">
               <div className="flex items-center gap-1">
-                <Languages className="w-3.5 h-3.5" />
+                <Languages className="w-3 h-3" />
                 <SelectValue />
               </div>
             </SelectTrigger>
@@ -289,17 +318,17 @@ export function SubtitleList({
             onClick={runCorrection}
             disabled={isAILoading || !selectedAIModelId}
             className={cn(
-              'flex items-center gap-1 px-2.5 py-1 text-xs rounded font-medium transition-colors',
+              'flex items-center gap-1 px-2 py-0.5 text-xs rounded font-medium transition-colors',
               isAILoading
-                ? 'bg-aimu-purple/50 text-white cursor-not-allowed'
-                : 'bg-aimu-purple text-white hover:bg-aimu-purple/90 disabled:opacity-40 disabled:cursor-not-allowed',
+                ? 'bg-aimu-purple/50 text-white -not-allowed'
+                : 'bg-aimu-purple text-white hover:bg-aimu-purple/90 disabled:opacity-40 disabled:-not-allowed',
             )}
             title={t('components.workstation.correctSubtitle')}
           >
             {isAILoading && aiProgress?.data ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <Loader2 className="w-3 h-3 animate-spin" />
             ) : (
-              <Wand2 className="w-3.5 h-3.5" />
+              <Wand2 className="w-3 h-3" />
             )}
             <span>{isAILoading ? t('components.workstation.correcting') : t('components.workstation.correctStart')}</span>
           </button>
@@ -309,17 +338,17 @@ export function SubtitleList({
             onClick={() => runTranslation(targetLang)}
             disabled={isAILoading || !selectedAIModelId}
             className={cn(
-              'flex items-center gap-1 px-2.5 py-1 text-xs rounded font-medium transition-colors',
+              'flex items-center gap-1 px-2 py-0.5 text-xs rounded font-medium transition-colors',
               isAILoading
-                ? 'bg-aimu-red-bg/70 text-aimu-coral cursor-not-allowed'
-                : 'bg-aimu-red-bg text-aimu-coral hover:bg-aimu-red-bg/80 disabled:opacity-40 disabled:cursor-not-allowed',
+                ? 'bg-aimu-red-bg/70 text-aimu-coral -not-allowed'
+                : 'bg-aimu-red-bg text-aimu-coral hover:bg-aimu-red-bg/80 disabled:opacity-40 disabled:-not-allowed',
             )}
             title={t('components.workstation.translateStart')}
           >
             {isAILoading ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <Loader2 className="w-3 h-3 animate-spin" />
             ) : (
-              <Languages className="w-3.5 h-3.5" />
+              <Languages className="w-3 h-3" />
             )}
             <span>{isAILoading ? t('components.workstation.translating') : t('components.workstation.translateStart')}</span>
           </button>
@@ -387,6 +416,7 @@ export function SubtitleList({
         <div className="flex items-center gap-2">
           <div className="text-[11px] text-aimu-text-muted font-mono mr-2">
             {t('components.workstation.total')}: {statistics.totalCount} | {t('components.workstation.active')}: {statistics.activeCount}
+            {statistics.blankCount > 0 && ` | ${t('components.workstation.blankSegment')}: ${statistics.blankCount}`}
           </div>
           
           <button

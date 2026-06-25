@@ -29,7 +29,9 @@ import {
 } from '@/stores/messageStore';
 import { UnifiedVideoProcessor } from '@/services/UnifiedVideoProcessor';
 import { saveFile } from '@/utils/createFileWriter';
-import { AudioWaveform, Download, Github, Maximize2, Mic2, Play, Redo2, Scissors, Upload, Wand2, Keyboard, Undo2, ZoomIn, ZoomOut, Settings, Loader2 } from 'lucide-react';
+import { AudioWaveform, Download, Eye, EyeOff, Github, Maximize2, Mic2, Play, Redo2, Scissors, Upload, Wand2, Keyboard, Undo2, ZoomIn, ZoomOut, Settings, Loader2 } from 'lucide-react';
+import { calculateBlankSegments } from '@/utils/timeUtils';
+import { toast } from 'sonner';
 import {
   Select,
   SelectContent,
@@ -97,17 +99,61 @@ const mockTranscript = {
   ],
 };
 
-const waveformBars = Array.from({ length: 168 }, (_, index) => {
-  const signal = Math.sin(index * 0.43) * 0.38 + Math.sin(index * 0.13 + 1.4) * 0.28;
-  const pulse = index % 17 === 0 ? 0.28 : 0;
-  return Math.max(14, Math.min(86, Math.round(44 + signal * 58 + pulse * 100)));
-});
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+const waveformDecodeLimitBytes = 180 * 1024 * 1024;
 
 const formatTimelineTime = (seconds: number) => {
   const minutes = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 };
+
+async function extractWaveformPeaks(videoFile: VideoFile): Promise<number[] | null> {
+  if (typeof window === 'undefined') return null;
+  if (!videoFile.file.size || videoFile.file.size > waveformDecodeLimitBytes) return null;
+
+  const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextClass) return null;
+
+  const audioContext = new AudioContextClass();
+
+  try {
+    const arrayBuffer = await videoFile.file.arrayBuffer();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    const sampleCount = Math.round(clamp(audioBuffer.duration * 24, 320, 2400));
+    const blockSize = Math.max(1, Math.floor(audioBuffer.length / sampleCount));
+    const peaks = new Array<number>(sampleCount).fill(0);
+    let maxPeak = 0;
+
+    for (let peakIndex = 0; peakIndex < sampleCount; peakIndex++) {
+      const start = peakIndex * blockSize;
+      const end = Math.min(audioBuffer.length, start + blockSize);
+      let sum = 0;
+      let count = 0;
+
+      for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+        const channelData = audioBuffer.getChannelData(channel);
+        for (let sampleIndex = start; sampleIndex < end; sampleIndex++) {
+          const sample = channelData[sampleIndex] || 0;
+          sum += sample * sample;
+          count += 1;
+        }
+      }
+
+      const rms = count > 0 ? Math.sqrt(sum / count) : 0;
+      peaks[peakIndex] = rms;
+      maxPeak = Math.max(maxPeak, rms);
+    }
+
+    if (maxPeak <= 0) return null;
+    return peaks.map(peak => clamp(Math.sqrt(peak / maxPeak), 0.06, 1));
+  } catch (error) {
+    console.warn('音频波形解码失败，使用合成波形:', error);
+    return null;
+  } finally {
+    await audioContext.close().catch(() => undefined);
+  }
+}
 
 function MockVideoPreview({ className }: { className?: string }) {
   const { t } = useTranslation();
@@ -155,6 +201,7 @@ function TimelineWaveform({
   onSeek,
   isASRLoading,
   asrProgress,
+  mediaWaveformPeaks,
 }: {
   currentTime: number;
   duration: number;
@@ -164,10 +211,19 @@ function TimelineWaveform({
   isASRLoading?: boolean;
   /** ASR 进度信息 */
   asrProgress?: import('@/types/subtitle').ASRProgress | null;
+  mediaWaveformPeaks?: number[] | null;
 }) {
   const { t } = useTranslation();
+  const resolvedTheme = useThemeStore(state => state.resolvedTheme);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const waveformCanvasRef = useRef<HTMLCanvasElement>(null);
   const [zoom, setZoom] = useState(1);
+  const [showSubtitleLayer, setShowSubtitleLayer] = useState(true);
+  const [viewportMetrics, setViewportMetrics] = useState({
+    width: 0,
+    height: 0,
+    scrollLeft: 0,
+  });
   const safeDuration = Math.max(duration, 1);
   
   // 基础像素密度：每秒50px，缩放会改变这个值
@@ -175,43 +231,71 @@ function TimelineWaveform({
   const pixelsPerSecond = basePixelsPerSecond * zoom;
   
   // 时间轴总宽度（像素）
-  const timelineWidth = safeDuration * pixelsPerSecond;
+  const timelineWidth = Math.max(safeDuration * pixelsPerSecond, viewportMetrics.width);
   
   // 播放头位置（像素）
-  const playheadPosition = currentTime * pixelsPerSecond;
+  const playheadPosition = clamp(currentTime, 0, safeDuration) * pixelsPerSecond;
   
-  const minZoom = 0.5;
+  const minZoom = 0.1;
   const maxZoom = 8;
   const zoomPercent = Math.round(zoom * 100);
-  
-  // 计算刻度：基于像素位置而非百分比
-  // 每秒一个刻度，每5秒显示标签
-  const rulerTicks = useMemo(() => {
-    const ticks: Array<{ time: number; leftPx: number; major: boolean; label: string }> = [];
-    const tickCount = Math.ceil(safeDuration);
-    for (let second = 0; second <= tickCount; second++) {
-      ticks.push({
-        time: second,
-        leftPx: second * pixelsPerSecond,
-        major: second % 5 === 0,
-        label: formatTimelineTime(second),
-      });
+
+  const activeRanges = useMemo(() => (
+    chunks
+      .filter(chunk => !chunk.deleted)
+      .map(chunk => chunk.timestamp)
+      .sort((a, b) => a[0] - b[0])
+  ), [chunks]);
+
+  const waveformPeaks = useMemo(() => {
+    if (mediaWaveformPeaks?.length) {
+      return mediaWaveformPeaks;
     }
-    return ticks;
-  }, [safeDuration, pixelsPerSecond]);
+
+    const sampleCount = Math.max(320, Math.ceil(safeDuration * 24));
+    let rangeIndex = 0;
+
+    return Array.from({ length: sampleCount }, (_, index) => {
+      const progress = sampleCount === 1 ? 0 : index / (sampleCount - 1);
+      const time = progress * safeDuration;
+
+      while (
+        rangeIndex < activeRanges.length - 1 &&
+        activeRanges[rangeIndex][1] < time
+      ) {
+        rangeIndex += 1;
+      }
+
+      const activeRange = activeRanges[rangeIndex];
+      const isActive = activeRanges.length === 0 ||
+        (activeRange && time >= activeRange[0] && time <= activeRange[1]);
+      const signal =
+        Math.abs(Math.sin(index * 0.37)) * 0.38 +
+        Math.abs(Math.sin(index * 0.11 + 1.7)) * 0.32 +
+        Math.abs(Math.sin(index * 0.023 + 0.4)) * 0.22;
+      const pulse = index % 29 === 0 ? 0.2 : 0;
+      const intensity = isActive ? 0.72 : 0.2;
+
+      return clamp((signal + pulse) * intensity + (isActive ? 0.12 : 0.04), 0.08, 0.96);
+    });
+  }, [activeRanges, mediaWaveformPeaks, safeDuration]);
 
   const handleZoomOut = useCallback(() => {
     setZoom((currentZoom) => Math.max(minZoom, Number((currentZoom / 1.5).toFixed(2))));
-  }, []);
+  }, [minZoom]);
 
   const handleZoomIn = useCallback(() => {
     setZoom((currentZoom) => Math.min(maxZoom, Number((currentZoom * 1.5).toFixed(2))));
-  }, []);
+  }, [maxZoom]);
 
   const handleFitTimeline = useCallback(() => {
-    setZoom(1);
+    const viewportWidth = viewportRef.current?.clientWidth ?? 0;
+    const fitZoom = viewportWidth > 0
+      ? clamp(viewportWidth / (safeDuration * basePixelsPerSecond), minZoom, maxZoom)
+      : 1;
+    setZoom(Number(fitZoom.toFixed(2)));
     viewportRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
-  }, []);
+  }, [safeDuration, basePixelsPerSecond, minZoom, maxZoom]);
 
   const handleTimelineClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (!onSeek) return;
@@ -239,6 +323,166 @@ function TimelineWaveform({
     }
   }, [playheadPosition]);
 
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    let frameId = 0;
+    const updateMetrics = () => {
+      frameId = 0;
+      const nextMetrics = {
+        width: viewport.clientWidth,
+        height: viewport.clientHeight,
+        scrollLeft: viewport.scrollLeft,
+      };
+
+      setViewportMetrics(previous => (
+        previous.width === nextMetrics.width &&
+        previous.height === nextMetrics.height &&
+        previous.scrollLeft === nextMetrics.scrollLeft
+          ? previous
+          : nextMetrics
+      ));
+    };
+
+    const scheduleUpdate = () => {
+      if (frameId) return;
+      frameId = window.requestAnimationFrame(updateMetrics);
+    };
+
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(scheduleUpdate)
+      : null;
+
+    resizeObserver?.observe(viewport);
+    viewport.addEventListener('scroll', scheduleUpdate, { passive: true });
+    scheduleUpdate();
+
+    return () => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+      resizeObserver?.disconnect();
+      viewport.removeEventListener('scroll', scheduleUpdate);
+    };
+  }, []);
+
+  useEffect(() => {
+    const canvas = waveformCanvasRef.current;
+    if (!canvas || viewportMetrics.width <= 0 || viewportMetrics.height <= 0) return;
+
+    const width = Math.max(1, Math.floor(viewportMetrics.width));
+    const height = Math.max(1, Math.floor(viewportMetrics.height));
+    const dpr = window.devicePixelRatio || 1;
+    const targetWidth = Math.floor(width * dpr);
+    const targetHeight = Math.floor(height * dpr);
+
+    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+    }
+
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+
+    const context = canvas.getContext('2d');
+    if (!context) return;
+
+    const rootStyles = getComputedStyle(document.documentElement);
+    const panelColor = rootStyles.getPropertyValue('--aimu-bg-input').trim() || '#f0f0f4';
+    const borderColor = rootStyles.getPropertyValue('--aimu-border').trim() || '#e0e0e6';
+    const borderLightColor = rootStyles.getPropertyValue('--aimu-border-light').trim() || '#ececf0';
+    const textColor = rootStyles.getPropertyValue('--aimu-text-secondary').trim() || '#5a5a62';
+    const mutedColor = rootStyles.getPropertyValue('--aimu-text-muted').trim() || '#8d9095';
+    const coralColor = rootStyles.getPropertyValue('--aimu-accent-coral').trim() || '#e85555';
+
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    context.clearRect(0, 0, width, height);
+    context.fillStyle = panelColor;
+    context.fillRect(0, 0, width, height);
+
+    const rulerHeight = 24;
+    const waveformTop = 32;
+    const waveformBottom = height - 4;
+    const waveformHeight = Math.max(1, waveformBottom - waveformTop);
+    const centerY = waveformTop + waveformHeight / 2;
+
+    context.strokeStyle = borderColor;
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(0, rulerHeight + 0.5);
+    context.lineTo(width, rulerHeight + 0.5);
+    context.moveTo(0, centerY + 0.5);
+    context.lineTo(width, centerY + 0.5);
+    context.stroke();
+
+    const visibleStartPx = viewportMetrics.scrollLeft;
+    const visibleEndPx = visibleStartPx + width;
+    const tickStep = pixelsPerSecond < 10 ? 5 : 1;
+    const labelStep = pixelsPerSecond < 14 ? 30 : pixelsPerSecond < 28 ? 10 : 5;
+    const firstTick = Math.max(0, Math.floor(visibleStartPx / pixelsPerSecond / tickStep) * tickStep);
+    const lastTick = Math.min(Math.ceil(safeDuration), Math.ceil(visibleEndPx / pixelsPerSecond));
+
+    context.font = '10px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+    context.textBaseline = 'top';
+
+    for (let second = firstTick; second <= lastTick; second += tickStep) {
+      const x = Math.round(second * pixelsPerSecond - visibleStartPx) + 0.5;
+      const isMajor = second % labelStep === 0;
+
+      context.strokeStyle = isMajor ? textColor : mutedColor;
+      context.globalAlpha = isMajor ? 0.9 : 0.45;
+      context.beginPath();
+      context.moveTo(x, isMajor ? 8 : 14);
+      context.lineTo(x, rulerHeight);
+      context.stroke();
+
+      if (isMajor) {
+        context.globalAlpha = 1;
+        context.fillStyle = textColor;
+        context.fillText(formatTimelineTime(second), x + 4, 4);
+      }
+    }
+
+    context.globalAlpha = 0.55;
+    context.strokeStyle = borderLightColor;
+    context.beginPath();
+    for (let x = 0; x <= width; x += Math.max(24, pixelsPerSecond)) {
+      context.moveTo(Math.round(x) + 0.5, waveformTop);
+      context.lineTo(Math.round(x) + 0.5, waveformBottom);
+    }
+    context.stroke();
+
+    const barStep = pixelsPerSecond < 12 ? 2 : pixelsPerSecond < 40 ? 3 : 4;
+    const barWidth = clamp(barStep * 0.58, 1, 3);
+    context.fillStyle = coralColor;
+
+    for (let x = 0; x <= width; x += barStep) {
+      const time = clamp((visibleStartPx + x) / pixelsPerSecond, 0, safeDuration);
+      const peakIndex = Math.floor((time / safeDuration) * (waveformPeaks.length - 1));
+      const peak = waveformPeaks[peakIndex] ?? 0.12;
+      const barHeight = Math.max(2, peak * waveformHeight * 0.88);
+      const y = centerY - barHeight / 2;
+
+      context.globalAlpha = 0.34 + peak * 0.52;
+      if (typeof context.roundRect === 'function') {
+        context.beginPath();
+        context.roundRect(x, y, barWidth, barHeight, barWidth / 2);
+        context.fill();
+      } else {
+        context.fillRect(x, y, barWidth, barHeight);
+      }
+    }
+
+    context.globalAlpha = 1;
+  }, [
+    pixelsPerSecond,
+    resolvedTheme,
+    safeDuration,
+    viewportMetrics,
+    waveformPeaks,
+  ]);
+
   return (
     <div className="h-[132px] shrink-0 border-t border-aimu-border bg-aimu-panel">
       <div className="flex h-8 items-center justify-between border-b border-aimu-border px-3">
@@ -258,6 +502,20 @@ function TimelineWaveform({
           )}
         </div>
         <div className="flex items-center gap-1 text-aimu-text-muted">
+          <button
+            type="button"
+            onClick={() => setShowSubtitleLayer(isVisible => !isVisible)}
+            aria-pressed={showSubtitleLayer}
+            className={cn(
+              'rounded p-1 hover:bg-aimu-hover hover:text-aimu-text-primary',
+              showSubtitleLayer && 'text-aimu-coral'
+            )}
+            title={showSubtitleLayer
+              ? t('components.workstation.hideSubtitleOverlay')
+              : t('components.workstation.showSubtitleOverlay')}
+          >
+            {showSubtitleLayer ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+          </button>
           <button className="rounded p-1 hover:bg-aimu-hover hover:text-aimu-text-primary" title={t('components.workstation.cut')}>
             <Scissors className="h-3.5 w-3.5" />
           </button>
@@ -285,8 +543,7 @@ function TimelineWaveform({
           <button
             type="button"
             onClick={handleFitTimeline}
-            disabled={zoom === 1}
-            className="rounded p-1 hover:bg-aimu-hover hover:text-aimu-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded p-1 hover:bg-aimu-hover hover:text-aimu-text-primary"
             title={t('components.workstation.fit')}
           >
             <Maximize2 className="h-3.5 w-3.5" />
@@ -295,87 +552,64 @@ function TimelineWaveform({
       </div>
       <div className="h-[100px] px-3 py-2">
         <div ref={viewportRef} className="h-full overflow-x-auto overflow-y-hidden">
-          <div className="relative h-full" style={{ width: `${timelineWidth}px`, minWidth: '100%' }}>
-            <div
-              data-testid="timeline-ruler"
-              className="timeline-ruler absolute left-0 right-0 top-0 h-6 cursor-pointer overflow-hidden rounded border border-aimu-border bg-aimu-input"
-              onClick={handleTimelineClick}
-            >
-              {rulerTicks.map((tick) => (
+          <div
+            data-testid="timeline-ruler"
+            className="relative h-full cursor-pointer overflow-hidden rounded border border-aimu-border bg-aimu-input"
+            style={{ width: `${timelineWidth}px`, minWidth: '100%' }}
+            onClick={handleTimelineClick}
+          >
+            <canvas
+              ref={waveformCanvasRef}
+              data-testid="timeline-waveform-canvas"
+              className="pointer-events-none sticky left-0 top-0 z-0 block h-full"
+              aria-hidden="true"
+            />
+            {showSubtitleLayer && chunks.map((chunk) => {
+              const leftPx = chunk.timestamp[0] * pixelsPerSecond;
+              const widthPx = (chunk.timestamp[1] - chunk.timestamp[0]) * pixelsPerSecond;
+              const label = [chunk.text, chunk.secondText].filter(Boolean).join(' / ');
+              return (
                 <div
-                  key={tick.time}
+                  key={chunk.id}
                   className={cn(
-                    'absolute bottom-0 w-px -translate-x-px',
-                    tick.major ? 'h-4 bg-aimu-text-primary' : 'h-2 bg-aimu-text-muted/70'
+                    'absolute bottom-1 top-8 z-10 flex cursor-pointer items-center overflow-hidden rounded-sm border px-1.5 shadow-sm',
+                    chunk.deleted
+                      ? 'border-aimu-coral/45 bg-aimu-coral/18'
+                      : 'border-aimu-purple/65 bg-aimu-purple/30'
                   )}
-                  style={{ left: `${tick.leftPx}px` }}
+                  style={{ left: `${leftPx}px`, width: `${Math.max(widthPx, 32)}px` }}
+                  title={label}
                 >
-                  {tick.major && (
-                    <span className="absolute left-1 top-0 whitespace-nowrap font-mono text-[10px] leading-none text-aimu-text-secondary">
-                      {tick.label}
-                    </span>
+                  <span
+                    className={cn(
+                      'min-w-0 truncate text-[10px] font-medium leading-none opacity-75',
+                      chunk.deleted
+                        ? 'text-aimu-coral line-through decoration-aimu-coral'
+                        : 'text-aimu-text-primary'
+                    )}
+                  >
+                    {label}
+                  </span>
+                </div>
+              );
+            })}
+            <div
+              className="pointer-events-none absolute bottom-1 top-8 z-20 w-px bg-white shadow-[0_0_0_1px_rgba(245,108,108,0.65)]"
+              style={{ left: `${playheadPosition}px` }}
+            >
+              <div className="absolute -left-1.5 -top-1 h-3 w-3 rounded-full bg-aimu-coral" />
+            </div>
+            {isASRLoading && (
+              <div className="absolute inset-0 z-30 flex items-center justify-center bg-aimu-panel/70 backdrop-blur-[1px]">
+                <div className="flex items-center gap-2 rounded-full border border-aimu-border bg-aimu-panel px-3 py-1 text-[11px] text-aimu-coral shadow-sm">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <span className="font-medium">{asrProgress?.data || t('messages.asr.asrStarted')}</span>
+                  {asrProgress?.progress !== undefined && (
+                    <span className="font-mono text-aimu-text-muted">· {Math.round(asrProgress.progress)}%</span>
                   )}
                 </div>
-              ))}
-            </div>
-            <div
-              className="absolute bottom-1 left-0 right-0 top-8 cursor-pointer rounded border border-aimu-border bg-aimu-input"
-              onClick={handleTimelineClick}
-            >
-              <div className="absolute inset-x-0 top-1/2 h-px bg-aimu-border-light" />
-              <div className="absolute inset-0 flex items-center gap-[2px] px-2">
-                {waveformBars.map((height, index) => (
-                  <span
-                    key={index}
-                    className="flex-1 rounded-full bg-aimu-coral/65"
-                    style={{ height: `${height}%`, opacity: index % 5 === 0 ? 0.95 : 0.62 }}
-                  />
-                ))}
               </div>
-              {chunks.map((chunk) => {
-                const leftPx = chunk.timestamp[0] * pixelsPerSecond;
-                const widthPx = (chunk.timestamp[1] - chunk.timestamp[0]) * pixelsPerSecond;
-                const label = [chunk.text, chunk.secondText].filter(Boolean).join(' / ');
-                return (
-                  <div
-                    key={chunk.id}
-                    className={cn(
-                      'absolute bottom-1 top-1 flex cursor-pointer items-center overflow-hidden rounded-sm border px-1.5 shadow-sm',
-                      chunk.deleted
-                        ? 'border-aimu-coral/45 bg-aimu-coral/18'
-                        : 'border-aimu-purple/65 bg-aimu-purple/30'
-                    )}
-                    style={{ left: `${leftPx}px`, width: `${Math.max(widthPx, 32)}px` }}
-                    title={label}
-                  >
-                    <span
-                      className={cn(
-                        'min-w-0 truncate text-[10px] font-medium leading-none opacity-75',
-                        chunk.deleted
-                          ? 'text-aimu-coral line-through decoration-aimu-coral'
-                          : 'text-aimu-text-primary'
-                      )}
-                    >
-                      {label}
-                    </span>
-                  </div>
-                );
-              })}
-              <div className="pointer-events-none absolute bottom-0 top-0 w-px bg-white shadow-[0_0_0_1px_rgba(245,108,108,0.65)]" style={{ left: `${playheadPosition}px` }}>
-                <div className="absolute -left-1.5 -top-1 h-3 w-3 rounded-full bg-aimu-coral" />
-              </div>
-              {isASRLoading && (
-                <div className="absolute inset-0 flex items-center justify-center bg-aimu-panel/70 backdrop-blur-[1px]">
-                  <div className="flex items-center gap-2 rounded-full border border-aimu-border bg-aimu-panel px-3 py-1 text-[11px] text-aimu-coral shadow-sm">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    <span className="font-medium">{asrProgress?.data || t('messages.asr.asrStarted')}</span>
-                    {asrProgress?.progress !== undefined && (
-                      <span className="font-mono text-aimu-text-muted">· {Math.round(asrProgress.progress)}%</span>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
+            )}
           </div>
         </div>
       </div>
@@ -451,10 +685,14 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
   const setFont = useAppStore(state => state.setFont);
   const setDisplay = useAppStore(state => state.setDisplay);
   const chunks = useChunks();
+  const insertBlankChunks = useHistoryStore(state => state.insertBlankChunks);
+  const smartCutSilenceThreshold = useAppStore(state => state.smartCutSilenceThreshold);
+  const videoDuration = useAppStore(state => state.videoPlayerState.duration);
   const setTranscript = useSetTranscript();
 
   // 内存使用情况状态 (Aimu 风格)
   const [memory, setMemory] = useState({ used: '42.63 MB', allocated: '54.17 MB', limit: '3.5 GB' });
+  const [mediaWaveformPeaks, setMediaWaveformPeaks] = useState<number[] | null>(null);
 
   useEffect(() => {
     const updateMemory = () => {
@@ -580,6 +818,28 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
       useAppStore.getState().setStage('edit');
     }
   }, [chunks.length, setTranscript]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!videoFile) {
+      setMediaWaveformPeaks(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setMediaWaveformPeaks(null);
+    extractWaveformPeaks(videoFile).then((peaks) => {
+      if (!cancelled) {
+        setMediaWaveformPeaks(peaks);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [videoFile]);
 
   // ASR 语音识别：进入 transcribe 阶段后自动开始识别，
   // 不再弹出 ASR 窗口与消息，改由字幕编辑器/时间轴展示加载状态。
@@ -918,6 +1178,20 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
     setExportDialogOpen(true);
   }, []);
 
+  // 智能剪切空白段
+  const handleSmartCutBlank = useCallback(() => {
+    const segments = calculateBlankSegments(chunks, smartCutSilenceThreshold, videoDuration);
+    if (segments.length === 0) {
+      toast.info(t('components.workstation.smartCutEmpty'));
+      return;
+    }
+    const totalBlank = segments.reduce((acc, seg) => acc + (seg.end - seg.start), 0);
+    insertBlankChunks(segments);
+    toast.success(t('components.workstation.smartCutDone')
+      .replace('{count}', String(segments.length))
+      .replace('{seconds}', totalBlank.toFixed(1)));
+  }, [chunks, smartCutSilenceThreshold, videoDuration, insertBlankChunks, t]);
+
   // 处理视频导出配置
   const handleVideoExport = useCallback(async (options: VideoExportOptions) => {
     await handleStartProcessing({
@@ -993,6 +1267,16 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
             <button onClick={handleOpenVideoExportDialog} className="flex items-center space-x-1.5 text-sm font-medium hover:text-primary transition-colors">
               <Download className="w-4 h-4" />
               <span>{t('components.workstation.export')}</span>
+            </button>
+
+            <button
+              onClick={handleSmartCutBlank}
+              disabled={chunks.length === 0}
+              className="flex items-center space-x-1.5 text-sm font-medium hover:text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              title={t('components.workstation.smartCutBlankTitle')}
+            >
+              <Wand2 className="w-4 h-4" />
+              <span>{t('components.workstation.smartCutBlank')}</span>
             </button>
             
             <div className="h-4 w-px bg-border mx-2"></div>
@@ -1146,12 +1430,12 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
               {/* 右侧：字幕编辑器 (SubtitleList) - 占 50% 宽度 */}
               <div className="flex-1 flex flex-col bg-background overflow-hidden">
                 {/* Subtitle list editor header */}
-                <div className="flex-shrink-0 p-2 border-b border-border bg-card flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
+                <div className="flex-shrink-0 px-2 py-1 border-b border-border bg-card flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
                     <div className="flex items-center space-x-2">
                       <span className="text-xs text-muted-foreground font-medium">{t('components.workstation.display')}:</span>
                       <Select value={display} onValueChange={(val) => setDisplay(val as DisplayMode)}>
-                        <SelectTrigger className="h-7 w-28 text-xs bg-background">
+                        <SelectTrigger className="h-6 w-20 text-xs bg-background">
                           <SelectValue placeholder={t('components.workstation.displayBilingual')} />
                         </SelectTrigger>
                         <SelectContent>
@@ -1165,7 +1449,7 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
                     <div className="flex items-center space-x-2">
                       <span className="text-xs text-muted-foreground font-medium">{t('components.workstation.translate')}:</span>
                       <Select defaultValue="none">
-                        <SelectTrigger className="h-7 w-28 text-xs bg-background">
+                        <SelectTrigger className="h-6 w-20 text-xs bg-background">
                           <SelectValue placeholder={t('components.workstation.none')} />
                         </SelectTrigger>
                         <SelectContent>
@@ -1178,8 +1462,8 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
                     </div>
                   </div>
                   
-                  <button className="flex items-center space-x-1.5 px-3 py-1 bg-primary text-primary-foreground rounded text-xs font-medium hover:opacity-90 transition-opacity">
-                    <Play className="w-3.5 h-3.5" />
+                  <button className="flex items-center space-x-1 px-2.5 py-0.5 bg-primary text-primary-foreground rounded text-xs font-medium hover:opacity-90 transition-opacity">
+                    <Play className="w-3 h-3" />
                     <span>{t('components.workstation.start')}</span>
                   </button>
                 </div>
@@ -1205,6 +1489,7 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
           onSeek={handleTimelineSeek}
           isASRLoading={isASRLoading}
           asrProgress={asrProgress}
+          mediaWaveformPeaks={mediaWaveformPeaks}
         />
 
         {/* 底部状态栏 - Aimu 风格 */}

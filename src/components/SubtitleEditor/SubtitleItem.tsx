@@ -60,7 +60,10 @@ export function SubtitleItem(props: SubtitleItemProps) {
   }, [chunk.secondText]);
 
   const handleChunkClick = useCallback(() => {
-    onSeekTo(chunk.timestamp[0]);
+    const [start, end] = chunk.timestamp;
+    // 添加微小偏移，避免相邻字幕共享边界时间时点击不触发跳转
+    const offset = Math.min(0.001, (end - start) * 0.01);
+    onSeekTo(start + offset);
   }, [chunk.timestamp, onSeekTo]);
 
   const handleDeleteClick = useCallback((e: React.MouseEvent) => {
@@ -91,6 +94,49 @@ export function SubtitleItem(props: SubtitleItemProps) {
   }, []);
 
   const duration = (chunk.timestamp[1] - chunk.timestamp[0]).toFixed(1);
+
+  // 空白占位段：紧凑渲染
+  if (chunk.isBlankSpacer) {
+    const isCut = chunk.deleted === true;
+    return (
+      <div
+        className={cn(
+          'group flex items-stretch border-b border-aimu-border-light hover:bg-aimu-hover transition-colors min-h-[48px]',
+          isCut ? 'bg-aimu-red-bg/15' : 'bg-green-500/10',
+          isCurrent && 'aimu-row-active',
+          className
+        )}
+        onClick={handleChunkClick}
+      >
+        {/* 左侧：切换标记按钮 */}
+        <div className="w-8 flex-shrink-0 flex items-center justify-center border-r border-transparent">
+          <button
+            onClick={handleDeleteClick}
+            className={cn(
+              'p-1 rounded transition-colors',
+              isCut ? 'text-aimu-coral hover:text-aimu-red' : 'text-green-500 hover:text-green-600'
+            )}
+            title={isCut ? t('components.workstation.restoreSegment') : t('components.workstation.deleteSegment')}
+          >
+            {isCut ? <RotateCcw className="w-3.5 h-3.5" /> : <Trash2 className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+
+        {/* 时间码 */}
+        <div className="w-[120px] flex-shrink-0 flex flex-col justify-center px-3 py-2 gap-1 border-r border-transparent select-none">
+          <div className="font-mono text-[11px] text-aimu-text-muted">{formatAimuTime(chunk.timestamp[0])}</div>
+          <div className="font-mono text-[11px] text-aimu-text-muted">{formatAimuTime(chunk.timestamp[1])}</div>
+        </div>
+
+        {/* 空白段标签 */}
+        <div className="flex-1 flex items-center px-4">
+          <span className={cn('text-xs font-medium', isCut ? 'text-aimu-coral' : 'text-green-500')}>
+            {t('components.workstation.blankSegment')} · {duration}s
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

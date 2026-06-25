@@ -162,18 +162,19 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
   // 处理视频时间更新
   const handleTimeUpdate = useCallback(() => {
     if (!videoRef.current || isDragging) return; // 拖拽时忽略 timeupdate 事件
-    
+
     const time = videoRef.current.currentTime;
     setLocalCurrentTime(time);
-    
+
     // 在预览模式下，检查是否需要跳过删除的片段
     if (previewMode && keptSegments.length > 0 && isPlaying) {
       if (!isTimeInKeptSegments(time)) {
         // 当前时间在删除片段中，跳转到下一个保留片段
         const nextSegment = findNextKeptSegment(time);
-        
+
         if (nextSegment) {
           videoRef.current.currentTime = nextSegment.start;
+          onTimeUpdate?.(nextSegment.start);
           return;
         } else {
           // 没有更多片段，暂停播放
@@ -184,11 +185,10 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
         }
       }
     }
-    
-    // 通知外部组件时间更新（使用新时间轴或原始时间轴）
-    const notifyTime = previewMode && keptSegments.length > 0 ? newTimelineTime : localCurrentTime;
-    onTimeUpdate?.(notifyTime);
-  }, [previewMode, keptSegments, isPlaying, isTimeInKeptSegments, findNextKeptSegment, newTimelineTime, onTimeUpdate, onPause, localCurrentTime, isDragging]);
+
+    // 通知外部组件时间更新（始终使用原始时间轴，保持与字幕编辑器/时间轴一致）
+    onTimeUpdate?.(time);
+  }, [previewMode, keptSegments, isPlaying, isTimeInKeptSegments, findNextKeptSegment, onTimeUpdate, onPause, isDragging]);
 
   // 播放/暂停
   const togglePlayPause = useCallback(() => {
@@ -205,36 +205,13 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
     }
   }, [isPlaying, onPlay, onPause]);
 
-  // 跳转到指定时间
+  // 跳转到指定时间（外部调用传入的是原始视频时间）
   const seekTo = useCallback((time: number) => {
     if (!videoRef.current) return;
 
-    let targetTime = time;
-
-    // 如果在预览模式且传入的是新时间轴时间，需要转换为原始时间
-    if (previewMode && keptSegments.length > 0) {
-      // 将新时间轴时间映射回原始时间
-      let remainingTime = Math.max(0, time);
-      targetTime = keptSegments[0]?.start || 0; // 默认到第一个片段开始
-      
-      for (const segment of keptSegments) {
-        if (remainingTime <= segment.duration) {
-          targetTime = segment.start + remainingTime;
-          break;
-        } else {
-          remainingTime -= segment.duration;
-        }
-      }
-      
-      // 确保targetTime不超出视频总长度
-      if (targetTime > duration) {
-        targetTime = duration;
-      }
-    }
-
-    videoRef.current.currentTime = targetTime;
-    setLocalCurrentTime(targetTime);
-  }, [previewMode, keptSegments]);
+    videoRef.current.currentTime = time;
+    setLocalCurrentTime(time);
+  }, []);
 
   // 快进/快退
   const skip = useCallback((seconds: number) => {
@@ -374,11 +351,9 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
     if (videoRef.current) {
       const finalTime = videoRef.current.currentTime;
       setLocalCurrentTime(finalTime);
-      
-      // 通知外部组件时间更新
-      const notifyTime = previewMode && keptSegments.length > 0 ? 
-        (dragTime || 0) : finalTime;
-      onTimeUpdate?.(notifyTime);
+
+      // 通知外部组件时间更新（始终使用原始时间轴）
+      onTimeUpdate?.(finalTime);
     }
     
     // 如果拖拽前在播放，恢复播放状态
@@ -387,7 +362,7 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
       setIsPlaying(true);
       onPlay?.();
     }
-  }, [isDragging, wasPlayingBeforeDrag, onPlay, previewMode, keptSegments, dragTime, onTimeUpdate]);
+  }, [isDragging, wasPlayingBeforeDrag, onPlay, onTimeUpdate]);
 
   // 绑定全局拖拽事件
   useEffect(() => {

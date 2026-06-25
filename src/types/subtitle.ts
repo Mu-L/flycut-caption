@@ -7,6 +7,7 @@ export interface SubtitleChunk {
   id: string;
   selected?: boolean; // 是否被选中删除
   deleted?: boolean; // 是否被删除
+  isBlankSpacer?: boolean; // 是否为智能剪切插入的空白占位段
 }
 
 export interface SubtitleTranscript {

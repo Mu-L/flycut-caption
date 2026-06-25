@@ -48,13 +48,13 @@ export function LanguageSelector({
         {variant === 'minimal' ? (
           <Button
             variant="ghost"
-            size="sm"
+            size="icon"
             aria-label={t('components.languageSelector.selectLanguage')}
-            className={cn("h-8 px-2", className)}
+            className={cn("size-7", className)}
           >
-            <Languages className="h-4 w-4" />
+            <Languages className="h-3.5 w-3.5" />
             {showText && (
-              <span className="ml-1 hidden sm:inline">
+              <span className="ml-1 hidden sm:inline text-xs">
                 {currentLangInfo.nativeName}
               </span>
             )}
@@ -80,7 +80,7 @@ export function LanguageSelector({
           <DropdownMenuItem
             key={language.code}
             onClick={() => handleLanguageChange(language.code)}
-            className="flex items-center justify-between cursor-pointer"
+            className="flex items-center justify-between -pointer"
           >
             <div className="flex flex-col">
               <span className="font-medium">{language.nativeName}</span>

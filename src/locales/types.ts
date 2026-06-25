@@ -273,6 +273,8 @@ export interface FlyCutCaptionLocale {
       timeline: string;
       cut: string;
       fit: string;
+      showSubtitleOverlay: string;
+      hideSubtitleOverlay: string;
       tip: string;
       used: string;
       allocated: string;
@@ -302,6 +304,12 @@ export interface FlyCutCaptionLocale {
       correctSubtitle: string;
       correctStart: string;
       translateStart: string;
+      smartCutBlank: string;
+      smartCutBlankTitle: string;
+      smartCutThreshold: string;
+      blankSegment: string;
+      smartCutDone: string;
+      smartCutEmpty: string;
       correcting: string;
       translating: string;
       aiRunning: string;

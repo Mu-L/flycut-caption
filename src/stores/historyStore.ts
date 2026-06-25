@@ -19,7 +19,12 @@ interface BatchUpdateAction {
   updates: { id: string; prev: Partial<Chunk>; next: Partial<Chunk> }[];
 }
 
-type HistoryAction = UpdateAction | BatchUpdateAction;
+interface InsertChunksAction {
+  type: "insert";
+  chunks: Chunk[]; // 被插入的占位 chunk（撤销时按 id 移除，重做时重新插入）
+}
+
+type HistoryAction = UpdateAction | BatchUpdateAction | InsertChunksAction;
 
 interface HistoryState {
   // 字幕数据
@@ -59,6 +64,9 @@ interface HistoryActions {
 
   // 批量更新多个 chunk 的 text/secondText（整批作为一次 undo）
   batchUpdateText: (updates: { id: string; text?: string; secondText?: string }[]) => void;
+
+  // 智能剪切：插入空白占位 chunk（deleted:true），作为一次可撤销操作
+  insertBlankChunks: (segments: { start: number; end: number }[]) => void;
 
   // 重置
   reset: () => void;
@@ -208,13 +216,20 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
             const chunk = newChunks[chunkIndex];
             newChunks[chunkIndex] = { ...chunk, ...action.prev };
           }
-        } else {
-          // batch
+        } else if (action.type === "batch") {
           for (const u of action.updates) {
             const chunkIndex = newChunks.findIndex(c => c.id === u.id);
             if (chunkIndex !== -1) {
               const chunk = newChunks[chunkIndex];
               newChunks[chunkIndex] = { ...chunk, ...u.prev };
+            }
+          }
+        } else {
+          // insert: 撤销时移除被插入的占位 chunk
+          const insertedIds = new Set(action.chunks.map(c => c.id));
+          for (let i = newChunks.length - 1; i >= 0; i--) {
+            if (insertedIds.has(newChunks[i].id)) {
+              newChunks.splice(i, 1);
             }
           }
         }
@@ -251,14 +266,21 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
             const chunk = newChunks[chunkIndex];
             newChunks[chunkIndex] = { ...chunk, ...action.next };
           }
-        } else {
-          // batch
+        } else if (action.type === "batch") {
           for (const u of action.updates) {
             const chunkIndex = newChunks.findIndex(c => c.id === u.id);
             if (chunkIndex !== -1) {
               const chunk = newChunks[chunkIndex];
               newChunks[chunkIndex] = { ...chunk, ...u.next };
             }
+          }
+        } else {
+          // insert: 重做时重新插入占位 chunk，按时间顺序合并
+          const existingIds = new Set(newChunks.map(c => c.id));
+          const toInsert = action.chunks.filter(c => !existingIds.has(c.id));
+          if (toInsert.length > 0) {
+            newChunks.push(...toInsert);
+            newChunks.sort((a, b) => a.timestamp[0] - b.timestamp[0]);
           }
         }
 
@@ -465,6 +487,46 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
         });
       },
 
+      // 智能剪切：插入空白占位 chunk
+      insertBlankChunks: (segments) => {
+        const state = get();
+        if (segments.length === 0) return;
+
+        // 跳过已存在的同 id 占位 chunk，避免重复插入
+        const existingIds = new Set(state.chunks.map(c => c.id));
+        const newBlankChunks: Chunk[] = [];
+        for (const seg of segments) {
+          const id = `blank-${seg.start.toFixed(3)}-${seg.end.toFixed(3)}`;
+          if (existingIds.has(id)) continue;
+          newBlankChunks.push({
+            id,
+            text: '',
+            timestamp: [seg.start, seg.end],
+            deleted: true,
+            isBlankSpacer: true,
+          });
+        }
+
+        if (newBlankChunks.length === 0) return;
+
+        const newChunks = [...state.chunks, ...newBlankChunks];
+        newChunks.sort((a, b) => a.timestamp[0] - b.timestamp[0]);
+
+        const action: InsertChunksAction = { type: "insert", chunks: newBlankChunks };
+        const derived = computeDerivedState(newChunks);
+
+        set({
+          chunks: newChunks,
+          undoStack: [...state.undoStack, action],
+          redoStack: [],
+          lastUpdateTime: Date.now(),
+          text: derived.text,
+          duration: derived.duration,
+          canUndo: true,
+          canRedo: false,
+        });
+      },
+
       // 重置所有状态
       reset: () => {
         set(initialState);
@@ -491,6 +553,7 @@ export const useDeleteSelected = () => useHistoryStore(state => state.deleteSele
 export const useRestoreSelected = () => useHistoryStore(state => state.restoreSelected);
 export const useUpdateChunkText = () => useHistoryStore(state => state.updateChunkText);
 export const useBatchUpdateText = () => useHistoryStore(state => state.batchUpdateText);
+export const useInsertBlankChunks = () => useHistoryStore(state => state.insertBlankChunks);
 export const useResetHistory = () => useHistoryStore(state => state.reset);
 
 // 获取所有chunks（在组件中使用 useMemo 过滤）

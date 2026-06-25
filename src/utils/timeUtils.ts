@@ -1,6 +1,58 @@
 // 时间处理工具函数
 
 /**
+ * 计算字幕片段之间的空白段（时间戳间隙）。
+ * 仅基于活跃（未删除）chunk 的时间戳，识别首段前、段间、末段后超过阈值的空白。
+ *
+ * @param chunks 字幕片段数组（将忽略 deleted=true 的项）
+ * @param threshold 最小空白时长（秒），间隙 >= threshold 才被视为空白段
+ * @param totalDuration 可选，整体媒体时长（秒）；提供时才会识别末段后空白
+ * @returns 空白段数组 [{start, end}]，按时间升序
+ */
+export function calculateBlankSegments(
+  chunks: Array<{ timestamp: [number, number]; deleted?: boolean }>,
+  threshold: number,
+  totalDuration?: number,
+): Array<{ start: number; end: number }> {
+  if (chunks.length === 0) return [];
+  if (threshold <= 0) return [];
+
+  // 仅取未删除片段并按开始时间排序
+  const active = chunks
+    .filter(c => !c.deleted)
+    .slice()
+    .sort((a, b) => a.timestamp[0] - b.timestamp[0]);
+
+  if (active.length === 0) return [];
+
+  const result: Array<{ start: number; end: number }> = [];
+
+  // 首段前空隙
+  if (active[0].timestamp[0] >= threshold) {
+    result.push({ start: 0, end: active[0].timestamp[0] });
+  }
+
+  // 段间空隙
+  for (let i = 1; i < active.length; i++) {
+    const gapStart = active[i - 1].timestamp[1];
+    const gapEnd = active[i].timestamp[0];
+    if (gapEnd - gapStart >= threshold) {
+      result.push({ start: gapStart, end: gapEnd });
+    }
+  }
+
+  // 末段后空隙
+  if (totalDuration !== undefined && isFinite(totalDuration)) {
+    const lastEnd = active[active.length - 1].timestamp[1];
+    if (totalDuration - lastEnd >= threshold) {
+      result.push({ start: lastEnd, end: totalDuration });
+    }
+  }
+
+  return result;
+}
+
+/**
  * 将秒数格式化为 HH:MM:SS 或 MM:SS 格式
  */
 export function formatTime(seconds: number, includeHours = false): string {

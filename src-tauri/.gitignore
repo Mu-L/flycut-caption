@@ -1,2 +1,10 @@
 /target
 /gen
+
+# FunASR sidecar binaries - not committed to git
+/binaries/funasr-asr*
+!/binaries/.gitkeep
+
+# FunASR models - large files, download separately
+/models/sensevoice/*
+!/models/sensevoice/.gitkeep

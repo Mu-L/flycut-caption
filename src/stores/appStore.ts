@@ -1,6 +1,6 @@
 // 主应用 Zustand Store
 import { create } from 'zustand'
-import { devtools } from 'zustand/middleware'
+import { devtools, persist } from 'zustand/middleware'
 import type { 
   VideoFile, 
   VideoPlayerState, 
@@ -8,6 +8,7 @@ import type {
   VideoProcessorConfig 
 } from '@/types/video'
 import type { ASRProgress } from '@/types/subtitle'
+import type { ASREngineType } from '@/services/asrService'
 import { hasWebGPU } from '@/utils/audioUtils'
 
 // 应用状态接口
@@ -32,6 +33,8 @@ export interface AppState {
   // 设置
   language: string
   deviceType: 'webgpu' | 'wasm'
+  asrEngineType: ASREngineType
+  asrModelId: string
 
   // Aimu 风格设置
   shadow: 'N' | 'S' | 'M' | 'L'
@@ -52,6 +55,7 @@ export interface AppActions {
   
   // ASR管理（仅进度）
   setASRProgress: (progress: ASRProgress) => void
+  clearASRProgress: () => void
   setCurrentTime: (time: number) => void
   
   // UI状态管理
@@ -61,6 +65,8 @@ export interface AppActions {
   // 设置管理
   setLanguage: (language: string) => void
   setDeviceType: (deviceType: 'webgpu' | 'wasm') => void
+  setASREngineType: (asrEngineType: ASREngineType) => void
+  setASRModelId: (asrModelId: string) => void
 
   // Aimu 风格设置管理
   setShadow: (shadow: AppState['shadow']) => void
@@ -103,6 +109,8 @@ const initialState: AppState = {
   
   language: 'en',
   deviceType: 'wasm',
+  asrEngineType: 'transformers',
+  asrModelId: 'sensevoice-small-int8',
 
   shadow: 'N',
   font: 'Source Han Sans CN (Normal)',
@@ -112,6 +120,7 @@ const initialState: AppState = {
 // 创建Store
 export const useAppStore = create<AppState & AppActions>()(
   devtools(
+    persist(
     (set) => ({
       ...initialState,
       
@@ -160,6 +169,13 @@ export const useAppStore = create<AppState & AppActions>()(
           ...state,
           asrProgress: progress
         })),
+
+      clearASRProgress: () =>
+        set((state) => ({
+          ...state,
+          asrProgress: null,
+          error: null,
+        })),
       
       setCurrentTime: (time) =>
         set((state) => ({
@@ -206,6 +222,18 @@ export const useAppStore = create<AppState & AppActions>()(
           deviceType
         })),
 
+      setASREngineType: (asrEngineType) =>
+        set((state) => ({
+          ...state,
+          asrEngineType
+        })),
+
+      setASRModelId: (asrModelId) =>
+        set((state) => ({
+          ...state,
+          asrModelId
+        })),
+
       setShadow: (shadow) =>
         set((state) => ({
           ...state,
@@ -232,10 +260,12 @@ export const useAppStore = create<AppState & AppActions>()(
           deviceType: state.deviceType, // 保持设备类型设置
         })),
       
-      // 初始化
+      // 初始化：仅在无已保存配置时自动检测设备
       initialize: async () => {
+        const hasPersistedSettings = localStorage.getItem('app-settings')
+        if (hasPersistedSettings) return
+        
         try {
-          // 检测设备支持
           const supportsWebGPU = await hasWebGPU()
           set((state) => ({
             ...state,
@@ -250,6 +280,19 @@ export const useAppStore = create<AppState & AppActions>()(
         }
       },
     }),
+    {
+      name: 'app-settings',
+      partialize: (state) => ({
+        language: state.language,
+        deviceType: state.deviceType,
+        asrEngineType: state.asrEngineType,
+        asrModelId: state.asrModelId,
+        shadow: state.shadow,
+        font: state.font,
+        display: state.display,
+      }),
+    }
+    ),
     {
       name: 'app-store', // 用于Redux DevTools
     }

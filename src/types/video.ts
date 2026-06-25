@@ -7,6 +7,8 @@ export interface VideoFile {
   size: number;
   type: string;
   name: string;
+  /** 本地文件路径（Tauri 环境下由原生文件选择器提供） */
+  path?: string;
 }
 
 export interface VideoPlayerState {

@@ -5,10 +5,11 @@ import { cn } from '@/lib/utils';
 import { useHistoryStore, useChunks, useHistoryText, useHistoryLanguage, useHistoryDuration, useCanUndo, useCanRedo, useUndo, useRedo } from '@/stores/historyStore';
 import { useAppStore } from '@/stores/appStore';
 import { isTimeInRange } from '@/utils/timeUtils';
-import { FileText, Trash2, RotateCcw, Undo, Redo, ArrowLeftRight, Languages } from 'lucide-react';
+import { FileText, Trash2, RotateCcw, Undo, Redo, ArrowLeftRight, Languages, Loader2, Mic, AlertCircle } from 'lucide-react';
 import { SubtitleItem } from './SubtitleItem';
 import type { EnhancedVideoPlayerRef } from '@/components/VideoPlayer/EnhancedVideoPlayer';
 import { useTranslation } from '@/contexts/LocaleProvider';
+import type { ASRProgress } from '@/types/subtitle';
 
 interface SubtitleListProps {
   className?: string;
@@ -17,11 +18,17 @@ interface SubtitleListProps {
   onSeek?: (time: number) => void;
   onPlayPause?: () => void;
   videoPlayerRef?: RefObject<EnhancedVideoPlayerRef>;
+  /** ASR 是否正在识别 */
+  isASRLoading?: boolean;
+  /** ASR 进度信息 */
+  asrProgress?: ASRProgress | null;
 }
 
 export function SubtitleList({
   className,
-  videoPlayerRef
+  videoPlayerRef,
+  isASRLoading,
+  asrProgress,
 }: SubtitleListProps) {
   const { t } = useTranslation();
   const chunks = useChunks();
@@ -117,6 +124,48 @@ export function SubtitleList({
       restoreSelected(deletedIds);
     }
   };
+
+  // ASR 识别中：在字幕编辑器内展示加载状态
+  if (isASRLoading) {
+    const isError = asrProgress?.status === 'error';
+    const progressValue = asrProgress?.progress ?? 0;
+    const stageLabel = asrProgress?.data || (asrProgress?.status === 'running'
+      ? t('messages.asr.asrProgress')
+      : t('messages.asr.modelLoading'));
+
+    return (
+      <div className={cn('flex flex-col h-full bg-aimu-panel', className)}>
+        <div className="flex-1 flex flex-col items-center justify-center p-8 select-none">
+          {isError ? (
+            <AlertCircle className="h-10 w-10 text-aimu-coral mb-4" />
+          ) : (
+            <Loader2 className="h-10 w-10 text-aimu-coral animate-spin mb-4" />
+          )}
+          <div className="flex items-center gap-2 text-aimu-text-primary font-medium mb-1">
+            {!isError && <Mic className="h-4 w-4 text-aimu-coral" />}
+            <span>{isError ? t('messages.asr.asrFailed') : t('messages.asr.asrStarted')}</span>
+          </div>
+          <p className="text-sm text-aimu-text-muted text-center max-w-xs">
+            {isError ? (asrProgress?.error || t('messages.asr.asrFailed')) : stageLabel}
+          </p>
+          {!isError && asrProgress?.progress !== undefined && (
+            <div className="w-48 mt-4 space-y-1.5">
+              <div className="w-full bg-aimu-input rounded-full h-1.5 overflow-hidden">
+                <div
+                  className="bg-aimu-coral h-1.5 rounded-full transition-all duration-300"
+                  style={{ width: `${progressValue}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-[10px] text-aimu-text-muted font-mono">
+                <span>{t('components.asrPanel.progress')}</span>
+                <span>{Math.round(progressValue)}%</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!transcript.chunks || transcript.chunks.length === 0) {
     return (

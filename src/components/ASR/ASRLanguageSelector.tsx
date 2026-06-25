@@ -121,7 +121,7 @@ export function ASRLanguageSelector({
       >
         <div className="flex items-center gap-2 min-w-0">
           <Globe className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-          <span className="truncate">{currentLanguageName}</span>
+          <span className="text-left break-words leading-tight">{currentLanguageName}</span>
         </div>
         
         <ChevronDown 

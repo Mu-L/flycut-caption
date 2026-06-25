@@ -6,9 +6,14 @@ import {
   type ASRDevice,
   type TransformersASREngineConfig,
 } from './asrEngines/TransformersASREngine';
+import { FunASRTauriEngine } from './asrEngines/FunASRTauriEngine';
+
+export type ASREngineType = 'transformers' | 'funasr-tauri';
 
 export class ASRService {
-  private engine = new TransformersASREngine();
+  private transformersEngine = new TransformersASREngine();
+  private funasrTauriEngine = new FunASRTauriEngine();
+  private currentEngineType: ASREngineType = 'transformers';
   private currentDevice: ASRDevice = DEFAULT_TRANSFORMERS_ASR_CONFIG.device;
 
   constructor() {
@@ -20,23 +25,50 @@ export class ASRService {
    * 初始化服务
    */
   private async init() {
-    // 检测设备能力
     const supportsWebGPU = await hasWebGPU();
     this.currentDevice = supportsWebGPU ? 'webgpu' : 'wasm';
-    this.engine.setConfig({ device: this.currentDevice });
+    this.transformersEngine.setConfig({ device: this.currentDevice });
     console.log('ASR设备检测结果:', { supportsWebGPU, currentDevice: this.currentDevice });
+  }
+
+  /**
+   * 获取当前使用的引擎实例
+   */
+  private getEngine() {
+    if (this.currentEngineType === 'funasr-tauri') return this.funasrTauriEngine;
+    return this.transformersEngine;
+  }
+
+  /**
+   * 设置引擎类型
+   */
+  setEngineType(engineType: ASREngineType) {
+    if (this.currentEngineType !== engineType) {
+      console.log('ASR引擎切换:', this.currentEngineType, '->', engineType);
+      this.currentEngineType = engineType;
+    }
+  }
+
+  /**
+   * 获取当前引擎类型
+   */
+  getEngineType(): ASREngineType {
+    return this.currentEngineType;
   }
 
   /**
    * 设置进度回调
    */
   public setProgressCallback(callback: (progress: ASRProgress) => void) {
-    this.engine.setProgressCallback(callback);
+    this.transformersEngine.setProgressCallback(callback);
+    this.funasrTauriEngine.setProgressCallback(callback);
   }
 
   public configure(config: Partial<TransformersASREngineConfig>) {
-    this.engine.setConfig(config);
-    this.currentDevice = this.engine.getConfig().device;
+    if (this.currentEngineType === 'transformers') {
+      this.transformersEngine.setConfig(config);
+      this.currentDevice = this.transformersEngine.getConfig().device;
+    }
   }
 
   /**
@@ -53,28 +85,38 @@ export class ASRService {
     if (this.currentDevice !== device) {
       console.log('ASR设备类型变更:', this.currentDevice, '->', device);
       this.currentDevice = device;
-      this.engine.setConfig({ device });
+      this.transformersEngine.setConfig({ device });
     }
   }
 
   /**
    * 加载模型
    */
-  public async loadModel(): Promise<void> {
-    console.log('ASR开始加载模型:', this.currentDevice);
-    await this.engine.loadModel();
+  public async loadModel(modelId?: string): Promise<void> {
+    console.log('ASR开始加载模型:', this.currentEngineType, this.currentDevice);
+    if (this.currentEngineType === 'funasr-tauri') {
+      await this.funasrTauriEngine.loadModel(modelId);
+    } else {
+      await this.transformersEngine.loadModel();
+    }
     console.log('ASR模型加载完成');
   }
 
   /**
    * 准备模型（分步操作第一步）
    */
-  public async prepareModel(): Promise<void> {
-    console.log('ASR准备模型:', this.currentDevice);
+  public async prepareModel(modelId?: string): Promise<void> {
+    const engine = this.getEngine();
+    console.log('ASR准备模型:', this.currentEngineType);
 
-    if (!this.engine.isReady()) {
+    if (this.currentEngineType === 'funasr-tauri') {
+      await this.loadModel(modelId);
+      return;
+    }
+
+    if (!engine.isReady()) {
       console.log('ASR开始加载模型');
-      await this.loadModel();
+      await this.loadModel(modelId);
     } else {
       console.log('ASR模型已加载，跳过准备步骤');
     }
@@ -85,23 +127,44 @@ export class ASRService {
    */
   public async transcribeAudio(
     audioBuffer: ArrayBuffer,
-    language: string = 'en'
+    language: string = 'en',
+    modelId?: string
   ): Promise<SubtitleTranscript> {
-    console.log('ASR开始转录:', { bufferSize: audioBuffer.byteLength, language });
-    
-    // 检查模型是否已准备好
-    if (!this.engine.isReady()) {
+    const engine = this.getEngine();
+    console.log('ASR开始转录:', { engineType: this.currentEngineType, bufferSize: audioBuffer.byteLength, language, modelId });
+
+    if (!engine.isReady()) {
       throw new Error('模型未准备好，请先调用 prepareModel()');
     }
 
-    this.engine.setConfig({ language });
+    if (this.currentEngineType === 'transformers') {
+      this.transformersEngine.setConfig({ language });
+      const audioData = await processAudioForASR(audioBuffer);
+      console.log('ASR音频数据处理完成:', { audioDataLength: audioData.length });
+      return this.transformersEngine.transcribe(audioData, language);
+    }
 
-    // 处理音频数据
-    const audioData = await processAudioForASR(audioBuffer);
-    console.log('ASR音频数据处理完成:', { audioDataLength: audioData.length });
+    // funasr-tauri
+    return this.funasrTauriEngine.transcribe(
+      { buffer: audioBuffer },
+      language,
+      modelId
+    );
+  }
 
-    console.log('ASR发送识别消息:', { audioLength: audioData.length, language });
-    return this.engine.transcribe(audioData, language);
+  /**
+   * Tauri 引擎专用：使用文件路径直接识别
+   */
+  public async transcribeWithPath(
+    inputPath: string, 
+    language: string = 'en',
+    modelId?: string
+  ): Promise<SubtitleTranscript> {
+    if (this.currentEngineType !== 'funasr-tauri') {
+      throw new Error('transcribeWithPath 仅在 funasr-tauri 引擎下可用');
+    }
+
+    return this.funasrTauriEngine.transcribe({ path: inputPath }, language, modelId);
   }
 
   /**
@@ -109,17 +172,44 @@ export class ASRService {
    */
   public async transcribeAudioWithAutoLoad(
     audioBuffer: ArrayBuffer,
-    language: string = 'en'
+    language: string = 'en',
+    modelId?: string
   ): Promise<SubtitleTranscript> {
     await this.prepareModel();
-    return this.transcribeAudio(audioBuffer, language);
+    return this.transcribeAudio(audioBuffer, language, modelId);
   }
 
   /**
    * 检查模型是否已加载
    */
   public isReady(): boolean {
-    return this.engine.isReady();
+    return this.getEngine().isReady();
+  }
+
+  /**
+   * 检查 Whisper 模型是否已加载（当前会话）
+   */
+  public isWhisperReady(): boolean {
+    return this.transformersEngine.isReady();
+  }
+
+  /**
+   * 预下载 Whisper 模型（不影响当前引擎选择）
+   * 进度通过 progressCallback 返回
+   */
+  public async preloadWhisperModel(device?: ASRDevice): Promise<void> {
+    if (device) {
+      this.transformersEngine.setConfig({ device });
+    }
+    // 保存当前回调，确保进度能传到调用方
+    await this.transformersEngine.loadModel();
+  }
+
+  /**
+   * 为 Whisper 预下载设置进度回调
+   */
+  public setWhisperProgressCallback(callback: (progress: ASRProgress) => void) {
+    this.transformersEngine.setProgressCallback(callback);
   }
 
   /**
@@ -127,7 +217,8 @@ export class ASRService {
    */
   public destroy() {
     console.log('ASR销毁服务');
-    this.engine.destroy();
+    this.transformersEngine.destroy();
+    this.funasrTauriEngine.destroy();
   }
 }
 

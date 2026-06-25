@@ -54,18 +54,19 @@
     "build:demo": "vite build --mode demo",
     "lint": "eslint .",
     "preview": "vite preview",
-    "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
+    "tauri": "pnpm build:funasr-sidecar && tauri",
+    "build:funasr-sidecar": "cargo build --release --manifest-path src-tauri/sidecars/funasr-asr/Cargo.toml && mkdir -p src-tauri/binaries && install -m 755 src-tauri/sidecars/funasr-asr/target/release/funasr-asr src-tauri/binaries/funasr-asr",
+    "tauri:dev": "pnpm build:funasr-sidecar && tauri dev",
+    "tauri:build": "pnpm build:funasr-sidecar && tauri build",
     "prepublishOnly": "npm run lint && npm run build:lib",
     "publish:npm": "npm publish"
   },
   "peerDependencies": {
+    "i18next": ">=25.0.0",
+    "i18next-browser-languagedetector": ">=8.0.0",
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0",
     "react-i18next": ">=15.0.0",
-    "i18next": ">=25.0.0",
-    "i18next-browser-languagedetector": ">=8.0.0",
     "zustand": ">=5.0.0"
   },
   "dependencies": {
@@ -81,6 +82,7 @@
     "@radix-ui/react-switch": "^1.2.6",
     "@radix-ui/react-toggle": "^1.1.10",
     "@radix-ui/react-toggle-group": "^1.1.11",
+    "@tauri-apps/api": "^2.11.1",
     "@webav/av-cliper": "^1.2.1",
     "@webav/av-recorder": "^1.2.1",
     "ahooks": "^3.9.5",

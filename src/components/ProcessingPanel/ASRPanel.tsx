@@ -17,9 +17,12 @@ import {
   Settings,
   Cpu,
   RefreshCw,
-  Globe
+  Globe,
+  BrainCircuit
 } from 'lucide-react';
 import { ASRLanguageSelector } from '@/components/ASR';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ModelDownloadPanel } from '@/components/ASR/ModelDownloadPanel';
 
 interface ASRPanelProps {
   className?: string;
@@ -29,6 +32,8 @@ export function ASRPanel({ className }: ASRPanelProps) {
   const videoFile = useAppStore((state) => state.videoFile);
   const language = useAppStore(state => state.language);
   const deviceType = useAppStore(state => state.deviceType);
+  const asrEngineType = useAppStore(state => state.asrEngineType);
+  const asrModelId = useAppStore(state => state.asrModelId);
   const asrProgress = useAppStore(state => state.asrProgress);
   const isLoading = useAppStore(state => state.isLoading);
   const error = useAppStore(state => state.error);
@@ -38,6 +43,8 @@ export function ASRPanel({ className }: ASRPanelProps) {
   const setLoading = useAppStore(state => state.setLoading);
   const setLanguage = useAppStore(state => state.setLanguage);
   const setDeviceType = useAppStore(state => state.setDeviceType);
+  const setASREngineType = useAppStore(state => state.setASREngineType);
+  const setASRModelId = useAppStore(state => state.setASRModelId);
   const setStage = useAppStore(state => state.setStage);
   
   // 使用 historyStore 管理转录内容
@@ -106,6 +113,11 @@ export function ASRPanel({ className }: ASRPanelProps) {
     asrService.setDevice(deviceType);
   }, [deviceType]);
 
+  // 同步引擎类型到 service
+  useEffect(() => {
+    asrService.setEngineType(asrEngineType);
+  }, [asrEngineType]);
+
   // 检查是否准备就绪
   const isReady = useCallback(() => {
     return asrService.isReady();
@@ -153,7 +165,8 @@ export function ASRPanel({ className }: ASRPanelProps) {
       
       await asrService.transcribeAudio(
         audioBuffer,
-        language
+        language,
+        asrModelId
       );
 
       // 注意：不在这里设置 transcript，让 progress callback 统一处理
@@ -181,6 +194,20 @@ export function ASRPanel({ className }: ASRPanelProps) {
     const deviceName = device === 'webgpu' ? 'WebGPU (GPU加速)' : 'WebAssembly (CPU)';
     showInfo('设备切换成功', `已切换到 ${deviceName}`);
   }, [setDeviceType, showInfo]);
+
+  // 更改引擎类型
+  const changeEngine = useCallback((engine: 'transformers' | 'funasr-tauri') => {
+    setASREngineType(engine);
+    const engineName = engine === 'funasr-tauri' ? 'FunASR Tauri 本地' : 'Whisper 浏览器本地';
+    showInfo('引擎切换成功', `已切换到 ${engineName}`);
+  }, [setASREngineType, showInfo]);
+
+  // 更改模型
+  const changeModel = useCallback((modelId: string) => {
+    setASRModelId(modelId);
+    const modelName = modelId === 'sensevoice-small-int8' ? 'SenseVoice Small' : 'Paraformer Small';
+    showInfo('模型切换成功', `已切换到 ${modelName}`);
+  }, [setASRModelId, showInfo]);
 
   // 更改语言
   const changeLanguage = useCallback((newLanguage: string) => {
@@ -287,6 +314,27 @@ export function ASRPanel({ className }: ASRPanelProps) {
       {showSettings && (
         <div className="border rounded-lg p-4 bg-muted/30 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* 识别引擎选择 */}
+            <div className="space-y-2">
+              <label className="flex items-center space-x-2 text-sm font-medium">
+                <BrainCircuit className="h-4 w-4" />
+                <span>识别引擎</span>
+              </label>
+              <Select
+                value={asrEngineType}
+                onValueChange={(v) => changeEngine(v as 'transformers' | 'funasr-tauri')}
+                disabled={isLoading}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="transformers">Whisper 浏览器本地</SelectItem>
+                  <SelectItem value="funasr-tauri">FunASR Tauri 本地</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             {/* ASR语言选择 */}
             <div className="space-y-2">
               <label className="flex items-center space-x-2 text-sm font-medium">
@@ -301,30 +349,75 @@ export function ASRPanel({ className }: ASRPanelProps) {
               />
             </div>
 
-            {/* 设备类型选择 */}
-            <div className="space-y-2">
-              <label className="flex items-center space-x-2 text-sm font-medium">
-                <Cpu className="h-4 w-4" />
-                <span>计算设备</span>
-              </label>
-              <select
-                value={deviceType}
-                onChange={(e) => handleDeviceChange(e.target.value as 'webgpu' | 'wasm')}
-                className="w-full p-2 border rounded-md bg-background"
-                disabled={isLoading}
-              >
-                <option value="webgpu">WebGPU (推荐)</option>
-                <option value="wasm">WebAssembly (兼容)</option>
-              </select>
-            </div>
+            {/* 设备类型选择 - 仅在 Transformers 引擎下显示 */}
+            {asrEngineType === 'transformers' && (
+              <div className="space-y-2">
+                <label className="flex items-center space-x-2 text-sm font-medium">
+                  <Cpu className="h-4 w-4" />
+                  <span>计算设备</span>
+                </label>
+                <Select
+                  value={deviceType}
+                  onValueChange={(v) => handleDeviceChange(v as 'webgpu' | 'wasm')}
+                  disabled={isLoading}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="webgpu">WebGPU (推荐)</SelectItem>
+                    <SelectItem value="wasm">WebAssembly (兼容)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* 模型选择 - 仅在 FunASR Tauri 引擎下显示 */}
+            {asrEngineType === 'funasr-tauri' && (
+              <div className="space-y-2">
+                <label className="flex items-center space-x-2 text-sm font-medium">
+                  <BrainCircuit className="h-4 w-4" />
+                  <span>识别模型</span>
+                </label>
+                <Select
+                  value={asrModelId}
+                  onValueChange={(v) => changeModel(v)}
+                  disabled={isLoading}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sensevoice-small-int8">SenseVoice Small (多语种推荐)</SelectItem>
+                    <SelectItem value="paraformer-small-int8">Paraformer Small (中文识别优先)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           
           <div className="text-xs text-muted-foreground space-y-1">
-            <p>• <strong>WebGPU</strong>: 速度更快，需要现代浏览器支持</p>
-            <p>• <strong>WebAssembly</strong>: 兼容性更好，适用于所有浏览器</p>
-            <p>• 首次使用会下载约 {deviceType === 'webgpu' ? '196MB' : '77MB'} 的模型文件</p>
+            {asrEngineType === 'transformers' ? (
+              <>
+                <p>• <strong>WebGPU</strong>: 速度更快，需要现代浏览器支持</p>
+                <p>• <strong>WebAssembly</strong>: 兼容性更好，适用于所有浏览器</p>
+                <p>• 首次使用会下载约 {deviceType === 'webgpu' ? '196MB' : '77MB'} 的模型文件</p>
+              </>
+            ) : (
+              <>
+                <p>• <strong>FunASR Tauri</strong>: 调用本地原生引擎，性能更优</p>
+                <p>• 需要将 sidecar 二进制和模型文件放在正确位置</p>
+                <p>• 支持 SenseVoice / Paraformer 多语种模型</p>
+              </>
+            )}
           </div>
+
         </div>
+      )}
+
+      {/* FunASR Tauri 模型下载区域 - 始终可见 */}
+      {asrEngineType === 'funasr-tauri' && (
+        <ModelDownloadPanel />
       )}
 
       {/* 状态显示 */}
@@ -355,17 +448,41 @@ export function ASRPanel({ className }: ASRPanelProps) {
 
       {/* 快速ASR语言选择 */}
       {!showSettings && (
-        <div className="border rounded-lg p-3 bg-muted/20">
-          <div className="flex items-center space-x-2 mb-2">
-            <Globe className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm font-medium">识别语言</span>
+        <div className="border rounded-lg p-3 bg-muted/20 space-y-3">
+          {/* 引擎和语言并排 */}
+          <div className="flex items-center space-x-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center space-x-2 mb-1">
+                <BrainCircuit className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">识别引擎</span>
+              </div>
+              <Select
+                value={asrEngineType}
+                onValueChange={(v) => changeEngine(v as 'transformers' | 'funasr-tauri')}
+                disabled={isLoading}
+              >
+                <SelectTrigger className="w-full text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="transformers">Whisper 浏览器本地</SelectItem>
+                  <SelectItem value="funasr-tauri">FunASR Tauri 本地</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center space-x-2 mb-1">
+                <Globe className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">识别语言</span>
+              </div>
+              <ASRLanguageSelector
+                language={language}
+                onLanguageChange={handleLanguageChange}
+                disabled={isLoading}
+              />
+            </div>
           </div>
-          <ASRLanguageSelector
-            language={language}
-            onLanguageChange={handleLanguageChange}
-            disabled={isLoading}
-            className="max-w-xs"
-          />
         </div>
       )}
 

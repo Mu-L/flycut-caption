@@ -2,5 +2,9 @@
   "identifier": "default",
   "description": "Default desktop capability",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "core:path:default",
+    "core:event:default"
+  ]
 }

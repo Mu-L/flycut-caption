@@ -1,10 +1,19 @@
 // ASR Worker - 基于 Whisper 的语音识别处理
 // 生成句子级别时间戳，适合字幕编辑
 
-import { pipeline } from '@huggingface/transformers';
+import { env, pipeline } from '@huggingface/transformers';
 import type { ASRProgress, SubtitleTranscript } from '../types/subtitle';
 import { isValidLanguageCode } from '../constants/languages';
 import type { TransformersASREngineConfig } from '../services/asrEngines/TransformersASREngine';
+
+// 本 worker 通过 `?worker&inline` 内联为 blob URL 运行。
+// onnxruntime-web 的 WebGPU 后端会用相对路径动态 import 胶水模块
+// (`ort-wasm-simd-threaded.jsep.mjs`) 并 fetch 对应 .wasm，而 blob URL
+// 无法解析相对路径，导致 "Importing a module script failed" →
+// "no available backend found"。这里把 wasmPaths 指向绝对 CDN 地址，
+// 让 ort 用完整 URL 加载，从而在内联 worker 中恢复 WebGPU 支持。
+// 注意：版本需与 package.json 中 @huggingface/transformers 保持一致。
+env.backends.onnx.wasm!.wasmPaths = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.1/dist/';
 
 // transformers.js 不支持直接将 HTTP URL 作为模型 ID
 // 我们需要拦截文件加载请求，将 Hugging Face Hub 的 URL 重定向到 OSS

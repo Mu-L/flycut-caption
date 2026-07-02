@@ -20,6 +20,19 @@ interface FileUploadProps {
   onFileSelect?: (file: VideoFile, audioBuffer: ArrayBuffer) => void;
 }
 
+const SUPPORTED_UPLOAD_TYPES = [
+  'video/mp4',
+  'video/webm',
+  'video/ogg',
+  'video/avi',
+  'video/mov',
+  'video/quicktime',
+  'audio/mp3',
+  'audio/wav',
+  'audio/ogg',
+  'audio/m4a',
+];
+
 export function FileUpload({ className, onFileSelect }: FileUploadProps) {
   const { t } = useTranslation();
   const setVideoFile = useAppStore((state) => state.setVideoFile);
@@ -32,27 +45,13 @@ export function FileUpload({ className, onFileSelect }: FileUploadProps) {
   const [uploadedFile, setUploadedFile] = useState<VideoFile | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // 支持的文件类型
-  const SUPPORTED_TYPES = [
-    'video/mp4',
-    'video/webm', 
-    'video/ogg',
-    'video/avi',
-    'video/mov',
-    'video/quicktime',
-    'audio/mp3',
-    'audio/wav',
-    'audio/ogg',
-    'audio/m4a',
-  ];
-
   const handleFileProcessing = useCallback(async (file: File) => {
     setError(null);
     setIsProcessing(true);
 
     try {
       // 验证文件类型
-      if (!validateFileType(file, SUPPORTED_TYPES)) {
+      if (!validateFileType(file, SUPPORTED_UPLOAD_TYPES)) {
         throw new Error(`${t('fileUpload.invalidFileType', { ns: 'components' })}: ${file.type}`);
       }
 
@@ -103,7 +102,7 @@ export function FileUpload({ className, onFileSelect }: FileUploadProps) {
     } finally {
       setIsProcessing(false);
     }
-  }, [setVideoFile, setAppError, onFileSelect]);
+  }, [setVideoFile, setAppError, onFileSelect, t]);
 
   const handleFileSelect = useCallback((files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -179,9 +178,9 @@ export function FileUpload({ className, onFileSelect }: FileUploadProps) {
       let file: File;
       try {
         file = new window.File([blob], 'whisper-timestamps-demo.mp4', { type: 'video/mp4' });
-      } catch (e) {
+      } catch {
         // 如果 File 构造函数不可用，使用 Blob 并添加必要属性
-        const fileBlob = blob as any;
+        const fileBlob = blob as Blob & { name: string; lastModified: number };
         fileBlob.name = 'whisper-timestamps-demo.mp4';
         fileBlob.lastModified = Date.now();
         file = fileBlob as File;
@@ -224,7 +223,7 @@ export function FileUpload({ className, onFileSelect }: FileUploadProps) {
       <input
         ref={fileInputRef}
         type="file"
-        accept={SUPPORTED_TYPES.join(',')}
+        accept={SUPPORTED_UPLOAD_TYPES.join(',')}
         onChange={handleInputChange}
         className="hidden"
       />

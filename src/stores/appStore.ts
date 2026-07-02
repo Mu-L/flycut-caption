@@ -11,6 +11,13 @@ import type { ASRProgress } from '@/types/subtitle'
 import type { ASREngineType } from '@/services/asrService'
 import type { AIModelConfig, AIProgress } from '@/types/ai'
 import { hasWebGPU } from '@/utils/audioUtils'
+import { DEFAULT_MODEL_ID } from '@/types/model'
+import { DEFAULT_WEB_MODEL_ID, getWebAsrModel } from '@/config/webAsrModels'
+
+// 旧版 model_id（不在当前 manifest 中），升级后需迁移到 DEFAULT_MODEL_ID
+const LEGACY_MODEL_IDS = ['sensevoice-small-int8', 'paraformer-small-int8']
+// 旧版 Web 模型 id（不在当前 Web 清单中），升级后需迁移到 DEFAULT_WEB_MODEL_ID
+const LEGACY_WEB_MODEL_IDS = ['']
 
 // 应用状态接口
 export interface AppState {
@@ -36,10 +43,11 @@ export interface AppState {
   deviceType: 'webgpu' | 'wasm'
   asrEngineType: ASREngineType
   asrModelId: string
+  // Web (Transformers) 引擎使用的模型 id（Web 短 id，例如 'whisper-small'）
+  webModelId: string
 
   // Aimu 风格设置
   shadow: 'N' | 'S' | 'M' | 'L'
-  font: string
   display: 'Bilingual' | 'Main' | 'Second'
 
   // AI 模型设置（字幕纠错 / 翻译）
@@ -77,10 +85,10 @@ export interface AppActions {
   setDeviceType: (deviceType: 'webgpu' | 'wasm') => void
   setASREngineType: (asrEngineType: ASREngineType) => void
   setASRModelId: (asrModelId: string) => void
+  setWebModelId: (webModelId: string) => void
 
   // Aimu 风格设置管理
   setShadow: (shadow: AppState['shadow']) => void
-  setFont: (font: string) => void
   setDisplay: (display: AppState['display']) => void
 
   // AI 模型管理
@@ -132,10 +140,10 @@ const initialState: AppState = {
   language: 'en',
   deviceType: 'wasm',
   asrEngineType: 'transformers',
-  asrModelId: 'sensevoice-small-int8',
+  asrModelId: DEFAULT_MODEL_ID,
+  webModelId: DEFAULT_WEB_MODEL_ID,
 
   shadow: 'N',
-  font: 'Source Han Sans CN (Normal)',
   display: 'Bilingual',
 
   aiModels: [],
@@ -263,18 +271,18 @@ export const useAppStore = create<AppState & AppActions>()(
           asrModelId
         })),
 
+      setWebModelId: (webModelId) =>
+        set((state) => ({
+          ...state,
+          webModelId
+        })),
+
       setShadow: (shadow) =>
         set((state) => ({
           ...state,
           shadow
         })),
       
-      setFont: (font) =>
-        set((state) => ({
-          ...state,
-          font
-        })),
-
       setDisplay: (display) =>
         set((state) => ({
           ...state,
@@ -351,6 +359,22 @@ export const useAppStore = create<AppState & AppActions>()(
       
       // 初始化：仅在无已保存配置时自动检测设备
       initialize: async () => {
+        // 兼容迁移：旧版 model_id（不在当前 manifest 中）→ DEFAULT_MODEL_ID
+        set((state) => {
+          if (LEGACY_MODEL_IDS.includes(state.asrModelId)) {
+            return { ...state, asrModelId: DEFAULT_MODEL_ID };
+          }
+          return state;
+        });
+        // 兼容迁移：旧版 / 未知 webModelId → DEFAULT_WEB_MODEL_ID
+        set((state) => {
+          const known = getWebAsrModel(state.webModelId);
+          if (!known || LEGACY_WEB_MODEL_IDS.includes(state.webModelId)) {
+            return { ...state, webModelId: DEFAULT_WEB_MODEL_ID };
+          }
+          return state;
+        });
+
         const hasPersistedSettings = localStorage.getItem('app-settings')
         if (hasPersistedSettings) return
         
@@ -376,8 +400,8 @@ export const useAppStore = create<AppState & AppActions>()(
         deviceType: state.deviceType,
         asrEngineType: state.asrEngineType,
         asrModelId: state.asrModelId,
+        webModelId: state.webModelId,
         shadow: state.shadow,
-        font: state.font,
         display: state.display,
         aiModels: state.aiModels,
         selectedAIModelId: state.selectedAIModelId,

@@ -1,20 +1,21 @@
 // WebAV 视频处理引擎实现
 
 import { Combinator, MP4Clip, OffscreenSprite, EmbedSubtitlesClip } from '@webav/av-cliper';
-import { 
-  createSubtitleClip, 
-  formatSubtitleText, 
-  calculateSubtitlePosition, 
-  secondsToMicroseconds,
-  type SubtitleChunk
-} from '@/utils/subtitleUtils';
+import { secondsToMicroseconds } from '@/utils/subtitleUtils';
 import type { 
   IVideoProcessingEngine, 
   VideoEngineType, 
   EngineCapabilities, 
   VideoProcessingOptions 
 } from '@/types/videoEngine';
-import type { SubtitleStyle } from '@/components/SubtitleSettings';
+import type { SubtitleChunk as TranscriptChunk } from '@/types/subtitle';
+import type { SubtitleStyle } from '@/subtitle';
+import {
+  defaultSubtitleStyle,
+  resolveExportSubtitleMetrics,
+  formatBilingualText,
+  mapSubtitleTimingsToCutVideo,
+} from '@/subtitle';
 
 interface SubtitleStruct {
   start: number; // 开始时间（微秒）
@@ -199,20 +200,22 @@ export class WebAVEngine implements IVideoProcessingEngine {
       const subtitleChunks = segments
         .filter(seg => seg.text && seg.id) // 只处理有字幕文本和ID的片段
         .map(seg => ({
-          id: seg.id!,
+          id: seg.id ?? `${seg.start}-${seg.end}`,
           text: seg.text!,
+          secondText: seg.secondText,
           timestamp: [seg.start, seg.end] as [number, number],
           deleted: !seg.keep,
-        }));
+        })) as TranscriptChunk[];
 
-      // 根据字幕处理类型添加字幕
-      console.log('options.subtitleProcessing:', options.subtitleProcessing, subtitleChunks);
-      if (options.subtitleProcessing && options.subtitleProcessing !== 'none' && subtitleChunks.length > 0) {
-        this.reportProgress('processing', 75, '添加字幕到视频...');
-        
-        await this.addSoftSubtitles(subtitleChunks, keptSegments, options.subtitleStyle);
-        
-        this.reportProgress('processing', 78, '字幕添加完成');
+      const subtitleMode = options.subtitleProcessing ?? 'none';
+      if (subtitleMode !== 'none' && subtitleChunks.length > 0) {
+        if (subtitleMode === 'soft') {
+          throw new Error('Web 端不支持软字幕轨道嵌入，请使用桌面版（FFmpeg）或选择硬烧录');
+        }
+
+        this.reportProgress('processing', 75, '烧录字幕到视频画面...');
+        await this.addBurnedSubtitles(subtitleChunks, keptSegments, options.subtitleStyle);
+        this.reportProgress('processing', 78, '字幕烧录完成');
       }
 
       this.reportProgress('processing', 80, '开始输出视频...');
@@ -408,154 +411,11 @@ export class WebAVEngine implements IVideoProcessingEngine {
 
 
   /**
-   * 将字幕添加到合成器中
+   * 硬烧录字幕到视频画面（WebAV EmbedSubtitlesClip）
    */
-  private async addSubtitlesToCombinator(
-    keptSegments: VideoSegment[], 
-    subtitleChunks: SubtitleChunk[], 
-    subtitleType: 'soft' | 'hard'
-  ): Promise<void> {
-    if (!this.combinator || !this.videoClip || subtitleChunks.length === 0) {
-      return;
-    }
-    
-    // WebAV引擎支持软烧录和硬烧录
-    console.log(`WebAV引擎使用${subtitleType === 'soft' ? '软' : '硬'}烧录字幕`);
-
-    // 计算最终视频中字幕的时间映射
-    const subtitleTimeMapping = this.calculateSubtitleTimeMapping(keptSegments, subtitleChunks);
-    
-    let subtitleIndex = 0;
-    for (const subtitleChunk of subtitleChunks) {
-      const mappedTime = subtitleTimeMapping.get(subtitleChunk);
-      if (!mappedTime) {
-        continue; // 这个字幕片段被删除了，跳过
-      }
-
-      try {
-        // 格式化字幕文本
-        const formattedText = formatSubtitleText(subtitleChunk.text, 40);
-        
-        // 创建字幕图像
-        const subtitleClip = await createSubtitleClip(formattedText, {
-          fontSize: 28,
-          color: 'white',
-          backgroundColor: 'rgba(0, 0, 0, 0.75)',
-          padding: 12,
-          borderRadius: 6,
-          textShadow: '2px 2px 4px rgba(0, 0, 0, 0.9)',
-        });
-
-        // 创建字幕精灵
-        const subtitleSprite = new OffscreenSprite(subtitleClip);
-        
-        // 设置字幕时间
-        subtitleSprite.time = {
-          offset: mappedTime.startTime,
-          duration: mappedTime.duration,
-        };
-
-        // 计算字幕位置（底部居中）
-        const position = calculateSubtitlePosition(
-          this.videoClip.meta.width,
-          this.videoClip.meta.height,
-          subtitleClip.meta.width || 400, // 默认宽度
-          subtitleClip.meta.height || 60  // 默认高度
-        );
-
-        // 设置字幕位置
-        subtitleSprite.rect.x = position.x;
-        subtitleSprite.rect.y = position.y;
-        subtitleSprite.rect.w = subtitleClip.meta.width || 400;
-        subtitleSprite.rect.h = subtitleClip.meta.height || 60;
-
-        // 设置 z-index 确保字幕在视频上方
-        subtitleSprite.zIndex = 10;
-
-        // 添加到合成器
-        await this.combinator.addSprite(subtitleSprite);
-        
-        console.log(`添加字幕 ${subtitleIndex + 1}: "${subtitleChunk.text}" (${mappedTime.startTime / 1e6}s - ${(mappedTime.startTime + mappedTime.duration) / 1e6}s)`);
-        
-        subtitleIndex++;
-      } catch (error) {
-        console.warn(`添加字幕失败:`, subtitleChunk.text, error);
-      }
-    }
-
-    console.log(`总共添加了 ${subtitleIndex} 个字幕`);
-  }
-
-  /**
-   * 计算字幕在最终视频中的时间映射
-   * 关键修复：正确处理被删除片段后的时间重新映射
-   */
-  private calculateSubtitleTimeMapping(
-    keptSegments: VideoSegment[], 
-    subtitleChunks: SubtitleChunk[]
-  ): Map<SubtitleChunk, { startTime: number; duration: number }> {
-    const mapping = new Map<SubtitleChunk, { startTime: number; duration: number }>();
-    
-    // 按时间排序保留的片段
-    const sortedKeptSegments = [...keptSegments].sort((a, b) => a.start - b.start);
-    
-    let currentOffset = 0; // 当前在最终视频中的偏移时间（微秒）
-    
-    for (const segment of sortedKeptSegments) {
-      // 找到这个片段内的字幕（修复：包含跨片段边界的字幕）
-      const segmentSubtitles = subtitleChunks.filter(subtitle => {
-        const [subtitleStart, subtitleEnd] = subtitle.timestamp;
-        // 字幕与片段有重叠即可（不要求完全包含）
-        return subtitleStart < segment.end && subtitleEnd > segment.start;
-      });
-      
-      for (const subtitle of segmentSubtitles) {
-        const [subtitleStart, subtitleEnd] = subtitle.timestamp;
-        
-        // 计算字幕与片段的重叠部分
-        const overlapStart = Math.max(subtitleStart, segment.start);
-        const overlapEnd = Math.min(subtitleEnd, segment.end);
-        
-        if (overlapStart < overlapEnd) {
-          // 计算字幕在最终视频中的开始时间
-          const relativeStart = overlapStart - segment.start; // 相对于片段开始的时间
-          const finalStartTime = currentOffset + secondsToMicroseconds(relativeStart);
-          
-          // 计算重叠部分的持续时间
-          const duration = secondsToMicroseconds(overlapEnd - overlapStart);
-          
-          // 如果已经存在映射，合并时间范围（处理跨片段字幕）
-          const existing = mapping.get(subtitle);
-          if (existing) {
-            // 扩展时间范围以包含新的重叠部分
-            const newStartTime = Math.min(existing.startTime, finalStartTime);
-            const newEndTime = Math.max(existing.startTime + existing.duration, finalStartTime + duration);
-            mapping.set(subtitle, {
-              startTime: newStartTime,
-              duration: newEndTime - newStartTime,
-            });
-          } else {
-            mapping.set(subtitle, {
-              startTime: finalStartTime,
-              duration: duration,
-            });
-          }
-        }
-      }
-      
-      // 更新偏移时间
-      currentOffset += secondsToMicroseconds(segment.end - segment.start);
-    }
-    
-    return mapping;
-  }
-  
-  /**
-   * 添加软烧录字幕（使用 EmbedSubtitlesClip）
-   */
-  private async addSoftSubtitles(
-    subtitleChunks: SubtitleChunk[], 
-    keptSegments: VideoSegment[], 
+  private async addBurnedSubtitles(
+    subtitleChunks: TranscriptChunk[],
+    keptSegments: VideoSegment[],
     subtitleStyle?: SubtitleStyle
   ): Promise<void> {
     if (!this.combinator || !this.videoClip) {
@@ -563,64 +423,48 @@ export class WebAVEngine implements IVideoProcessingEngine {
     }
     
     try {
-      // 生成 SubtitleStruct 数组
-      const subtitleStructs = this.generateSubtitleStructs(subtitleChunks, keptSegments);
+      const effectiveStyle = subtitleStyle ?? defaultSubtitleStyle;
+
+      const subtitleStructs = this.generateSubtitleStructs(
+        subtitleChunks,
+        keptSegments,
+        effectiveStyle,
+        this.videoClip.meta.width,
+        this.videoClip.meta.height,
+      );
       
       if (subtitleStructs.length === 0) {
         console.warn('没有字幕内容可以添加');
         return;
       }
-      
-      console.log('生成的字幕结构:', subtitleStructs);
-      console.log('使用的字幕样式:', subtitleStyle);
-      
-      // 使用配置的字幕样式或默认样式
-      const effectiveStyle = subtitleStyle || {
-        fontSize: 48,
-        fontFamily: 'Arial, sans-serif',
-        fontWeight: 'bold',
-        fontStyle: 'normal',
-        color: '#FFFFFF',
-        backgroundColor: '#000000',
-        borderColor: '#000000',
-        shadowColor: '#000000',
-        textAlign: 'center',
-        lineHeight: 1.2,
-        letterSpacing: 0,
-        borderWidth: 3,
-        shadowOffsetX: 2,
-        shadowOffsetY: 2,
-        shadowBlur: 4,
-        backgroundOpacity: 0,
-        backgroundRadius: 4,
-        backgroundPadding: 8,
-        bottomOffset: 60,
-        visible: true,
-      } as SubtitleStyle;
-      
-      // 创建字幕嵌入精灵 - 使用配置的样式
+      const metrics = resolveExportSubtitleMetrics(
+        effectiveStyle,
+        this.videoClip.meta.width,
+        this.videoClip.meta.height,
+      );
+
       const subtitleSprite = new OffscreenSprite(
         new EmbedSubtitlesClip(subtitleStructs, {
-          videoWidth: this.videoClip.meta.width,
-          videoHeight: this.videoClip.meta.height,
-          fontSize: effectiveStyle.fontSize,
-          fontFamily: effectiveStyle.fontFamily,
-          fontWeight: effectiveStyle.fontWeight,
-          fontStyle: effectiveStyle.fontStyle,
+          videoWidth: metrics.videoWidth,
+          videoHeight: metrics.videoHeight,
+          fontSize: metrics.fontSize,
+          fontFamily: metrics.fontFamily,
+          fontWeight: metrics.fontWeight,
+          fontStyle: metrics.fontStyle,
           color: effectiveStyle.color,
-          textBgColor: effectiveStyle.backgroundOpacity > 0 
+          textBgColor: effectiveStyle.backgroundOpacity > 0
             ? `${effectiveStyle.backgroundColor}${Math.round(effectiveStyle.backgroundOpacity * 255).toString(16).padStart(2, '0')}`
             : undefined,
-          strokeStyle: effectiveStyle.borderWidth > 0 ? effectiveStyle.borderColor : undefined,
-          lineWidth: effectiveStyle.borderWidth,
+          strokeStyle: metrics.borderWidth > 0 ? effectiveStyle.borderColor : undefined,
+          lineWidth: metrics.borderWidth,
           lineJoin: 'round',
           lineCap: 'round',
-          letterSpacing: effectiveStyle.letterSpacing.toString(),
-          bottomOffset: effectiveStyle.bottomOffset,
+          letterSpacing: metrics.letterSpacing,
+          bottomOffset: metrics.bottomOffset,
           textShadow: effectiveStyle.shadowBlur > 0 ? {
-            offsetX: effectiveStyle.shadowOffsetX,
-            offsetY: effectiveStyle.shadowOffsetY,
-            blur: effectiveStyle.shadowBlur,
+            offsetX: metrics.shadowOffsetX,
+            offsetY: metrics.shadowOffsetY,
+            blur: metrics.shadowBlur,
             color: effectiveStyle.shadowColor,
           } : undefined,
         })
@@ -642,31 +486,41 @@ export class WebAVEngine implements IVideoProcessingEngine {
       // 添加到合成器
       await this.combinator.addSprite(subtitleSprite);
       
-      console.log('软烧录字幕添加成功');
     } catch (error) {
-      console.error('添加软烧录字幕失败:', error);
+      console.error('字幕烧录失败:', error);
     }
   }
   
   /**
    * 生成 SubtitleStruct 数组，时间单位为微秒
    */
-  private generateSubtitleStructs(subtitleChunks: SubtitleChunk[], keptSegments: VideoSegment[]): SubtitleStruct[] {
-    // 计算时间映射
-    const timeMapping = this.calculateSubtitleTimeMapping(keptSegments, subtitleChunks);
-    
+  private generateSubtitleStructs(
+    subtitleChunks: TranscriptChunk[],
+    keptSegments: VideoSegment[],
+    style: SubtitleStyle,
+    videoWidth: number,
+    videoHeight: number,
+  ): SubtitleStruct[] {
+    const timeMapping = mapSubtitleTimingsToCutVideo(keptSegments, subtitleChunks);
+
     const subtitleStructs: SubtitleStruct[] = [];
-    
+
     for (const chunk of subtitleChunks) {
       const mappedTime = timeMapping.get(chunk);
-      if (!mappedTime) {
-        continue; // 这个字幕片段被删除了，跳过
-      }
-      
+      if (!mappedTime || mappedTime.end <= mappedTime.start) continue;
+
+      const text = formatBilingualText(
+        chunk.text,
+        chunk.secondText,
+        style,
+        videoWidth,
+        videoHeight,
+      );
+
       subtitleStructs.push({
-        start: mappedTime.startTime, // 已经是微秒
-        end: mappedTime.startTime + mappedTime.duration, // 已经是微秒
-        text: chunk.text
+        start: secondsToMicroseconds(mappedTime.start),
+        end: secondsToMicroseconds(mappedTime.end),
+        text,
       });
     }
     

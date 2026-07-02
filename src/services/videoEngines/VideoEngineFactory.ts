@@ -3,12 +3,15 @@
 import type { IVideoProcessingEngine, VideoEngineType, EngineCapabilities } from '@/types/videoEngine';
 import { WebAVEngine } from './WebAVEngine';
 import { FFmpegEngine } from './FFmpegEngine';
+import { FFmpegTauriEngine } from './FFmpegTauriEngine';
+import { isTauriRuntime } from '@/utils/runtime';
 // import { WebCodecsEngine } from './WebCodecsEngine'; // 未来扩展
 
 export class VideoEngineFactory {
   private static engines = new Map<VideoEngineType, new () => IVideoProcessingEngine>([
     ['webav', WebAVEngine],
     ['ffmpeg', FFmpegEngine],
+    ['ffmpeg-tauri', FFmpegTauriEngine],
     // ['webcodecs', WebCodecsEngine], // 未来扩展
   ]);
 
@@ -36,11 +39,18 @@ export class VideoEngineFactory {
    * 获取最佳可用引擎
    * 根据用户环境自动选择最适合的引擎
    */
-  static async getBestAvailableEngine(preferredOrder: VideoEngineType[] = ['webav', 'ffmpeg']): Promise<{
+  static getDefaultEngineOrder(): VideoEngineType[] {
+    return isTauriRuntime()
+      ? ['ffmpeg-tauri', 'webav', 'ffmpeg']
+      : ['webav', 'ffmpeg'];
+  }
+
+  static async getBestAvailableEngine(preferredOrder?: VideoEngineType[]): Promise<{
     engine: IVideoProcessingEngine;
     type: VideoEngineType;
   }> {
-    for (const type of preferredOrder) {
+    const order = preferredOrder ?? VideoEngineFactory.getDefaultEngineOrder();
+    for (const type of order) {
       try {
         const engine = await this.createEngine(type);
         console.log(`选择视频处理引擎: ${type}`);

@@ -1,5 +1,21 @@
 // 文件处理工具函数
 
+import type { VideoFile } from '@/types/video';
+
+const MEDIA_MIME_BY_EXT: Record<string, string> = {
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  avi: 'video/x-msvideo',
+  mkv: 'video/x-matroska',
+  ogg: 'video/ogg',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  m4a: 'audio/mp4',
+  flac: 'audio/flac',
+  aac: 'audio/aac',
+};
+
 /**
  * 检查文件是否为视频文件
  */
@@ -143,4 +159,67 @@ export function validateFileType(file: File, allowedTypes: string[]): boolean {
     }
     return file.type === type;
   });
+}
+
+async function getMediaDurationFromUrl(url: string, isVideo: boolean): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const media = document.createElement(isVideo ? 'video' : 'audio');
+
+    media.onloadedmetadata = () => {
+      resolve(Number.isFinite(media.duration) ? media.duration : 0);
+    };
+
+    media.onerror = () => {
+      reject(new Error('Failed to load media metadata'));
+    };
+
+    media.src = url;
+  });
+}
+
+/**
+ * 从远程 URL 加载视频或音频，返回可用于播放与 ASR 的 VideoFile。
+ */
+export async function loadMediaFromUrl(urlString: string): Promise<VideoFile> {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(urlString.trim());
+  } catch {
+    throw new Error('Invalid URL');
+  }
+
+  if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+    throw new Error('Invalid URL protocol');
+  }
+
+  const response = await fetch(parsedUrl.href);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  const contentType = blob.type || response.headers.get('content-type')?.split(';')[0]?.trim() || '';
+  const fileName = decodeURIComponent(parsedUrl.pathname.split('/').pop() || 'media');
+  const extension = getFileExtension(fileName);
+  const type = contentType || MEDIA_MIME_BY_EXT[extension] || 'application/octet-stream';
+  const file = new File([blob], fileName, { type });
+  const objectUrl = createVideoURL(file);
+
+  let duration = 0;
+  if (type.startsWith('video/') || type.startsWith('audio/')) {
+    try {
+      duration = await getMediaDurationFromUrl(objectUrl, type.startsWith('video/'));
+    } catch {
+      duration = 0;
+    }
+  }
+
+  return {
+    file,
+    url: objectUrl,
+    duration,
+    size: file.size,
+    type,
+    name: fileName,
+  };
 }

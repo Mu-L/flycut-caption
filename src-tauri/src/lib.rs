@@ -1,4 +1,5 @@
 mod commands;
+mod ffmpeg_bin;
 mod models;
 
 #[tauri::command]
@@ -38,7 +39,12 @@ pub fn run() {
             commands::model::check_model_downloaded,
             commands::model::check_all_models_downloaded,
             commands::model::download_model,
-            commands::model::download_all_models,
+            commands::model::download_all_models_and_assets,
+            commands::model::list_shared_assets,
+            commands::model::download_shared_asset,
+            commands::model::check_shared_asset_downloaded,
+            commands::video::check_ffmpeg_environment,
+            commands::video::process_video_with_ffmpeg,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

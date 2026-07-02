@@ -1,0 +1,1620 @@
+{
+  "schema_version": 1,
+  "name": "sherpa-onnx-subtitle-models",
+  "description": "用于客户端 sherpa-onnx 的字幕模型清单。所有 enabled=true 的模型都需要配合 VAD 生成 segment 级字幕时间戳；token/word 级时间戳需要单独 smoke test 验证。",
+  "runtime": {
+    "engine": "sherpa-onnx",
+    "runtime_should_bundle_with_app": true,
+    "note": "不要让用户下载 runtime 二进制；App 按平台内置 sherpa-onnx runtime，用户只下载模型资源。"
+  },
+  "timestamp_policy": {
+    "default_level": "segment",
+    "default_source": "vad",
+    "required_shared_asset_ids": [
+      "funasr-fsmn-vad",
+      "silero-vad"
+    ],
+    "subtitle_supported_rule": "supports_subtitle === true && timestamp.level in ['segment', 'token', 'word']",
+    "token_timestamp_rule": "如果要逐字高亮、逐词删除、口癖精剪，需要模型返回 token/word timestamps，并在下载后 smoke test 验证。",
+    "vad_subtitle_rule": "字幕 VAD 仅在自然停顿（min_silence≈0.35s）切段，max_speech≈30s 不短时长强切；短字幕由模型 token timestamps + 组句（默认 maxDuration=10s、pause=0.6s、句末符含 , 与空格）生成。"
+  },
+  "shared_assets": [
+    {
+      "id": "funasr-fsmn-vad",
+      "name": "FunASR FSMN VAD",
+      "type": "vad",
+      "description": "FunASR FSMN 语音活动检测（中文优化）。字幕场景默认 VAD，纯 Rust 内置推理。",
+      "required_for_subtitle": true,
+      "files": [
+        {
+          "path": "model.onnx",
+          "sha256": null
+        },
+        {
+          "path": "model_quant.onnx",
+          "sha256": null
+        },
+        {
+          "path": "vad.mvn",
+          "sha256": null
+        },
+        {
+          "path": "vad.yaml",
+          "sha256": null
+        },
+        {
+          "path": "config.yaml",
+          "sha256": null
+        }
+      ],
+      "download_sources": [
+        {
+          "region": "global",
+          "provider": "huggingface",
+          "url": "https://huggingface.co/funasr/fsmn-vad-onnx/resolve/main/model.onnx"
+        },
+        {
+          "region": "global",
+          "provider": "huggingface",
+          "url": "https://huggingface.co/funasr/fsmn-vad-onnx/resolve/main/model_quant.onnx"
+        },
+        {
+          "region": "global",
+          "provider": "huggingface",
+          "url": "https://huggingface.co/funasr/fsmn-vad-onnx/resolve/main/vad.mvn"
+        },
+        {
+          "region": "global",
+          "provider": "huggingface",
+          "url": "https://huggingface.co/funasr/fsmn-vad-onnx/resolve/main/vad.yaml"
+        }
+      ]
+    },
+    {
+      "id": "silero-vad",
+      "name": "Silero VAD",
+      "type": "vad",
+      "description": "语音活动检测模型。字幕场景用于把长音频切成语音片段，SRT/ASS 的 start/end 时间默认来自 VAD 分段。",
+      "required_for_subtitle": true,
+      "files": [
+        {
+          "path": "silero_vad.onnx",
+          "sha256": null
+        }
+      ],
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "modelscope_mirror",
+          "url": "https://www.modelscope.cn/models/pengzhendong/silero-vad/resolve/master/silero_vad.onnx"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
+        }
+      ]
+    }
+  ],
+  "models": [
+    {
+      "id": "sensevoice-small-int8-zh-en-ja-ko-yue-2024-07-17",
+      "name": "SenseVoice Small INT8",
+      "family": "sense_voice",
+      "enabled": true,
+      "recommended": true,
+      "languages": [
+        "zh",
+        "en",
+        "ja",
+        "ko",
+        "yue"
+      ],
+      "description": "通用推荐模型，支持中文、英文、日文、韩文、粤语。适合本地字幕、口播转写、普通会议录音。INT8 体积较小，适合客户端默认模型。",
+      "mode": "offline_non_streaming",
+      "quantization": "int8",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2",
+        "extract_dir": "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17",
+        "size_mb_estimate": 230
+      },
+      "files": [
+        {
+          "path": "model.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "sense_voice",
+        "sense_voice_model": "model.int8.onnx",
+        "tokens": "tokens.txt",
+        "language": "auto",
+        "use_itn": true,
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "modelscope_mirror",
+          "url": "https://www.modelscope.cn/models/pengzhendong/sherpa-onnx-sense-voice-zh-en-ja-ko-yue/resolve/master/",
+          "download_mode": "files"
+        },
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "sensevoice-small-fp32-zh-en-ja-ko-yue-2024-07-17",
+      "name": "SenseVoice Small FP32",
+      "family": "sense_voice",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "zh",
+        "en",
+        "ja",
+        "ko",
+        "yue"
+      ],
+      "description": "SenseVoice FP32 版本，精度可能略好但体积明显更大，更适合桌面端或用户明确选择高质量模式。",
+      "mode": "offline_non_streaming",
+      "quantization": "fp32",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2",
+        "extract_dir": "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+        "size_mb_estimate": 1100
+      },
+      "files": [
+        {
+          "path": "model.onnx",
+          "sha256": null
+        },
+        {
+          "path": "model.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "sense_voice",
+        "sense_voice_model": "model.onnx",
+        "tokens": "tokens.txt",
+        "language": "auto",
+        "use_itn": true,
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "modelscope_mirror",
+          "url": "https://www.modelscope.cn/models/pengzhendong/sherpa-onnx-sense-voice-zh-en-ja-ko-yue/resolve/master/",
+          "download_mode": "files"
+        },
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "sensevoice-small-yue-int8-2025-09-09",
+      "name": "SenseVoice Small 粤语增强 INT8",
+      "family": "sense_voice",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "zh",
+        "yue",
+        "en",
+        "ja",
+        "ko"
+      ],
+      "description": "粤语增强版 SenseVoice，适合粤语、普通话、英文、日文、韩文字幕。注意官方说明该模型不支持标点，字幕体验可能需要后处理标点模型或 LLM 标点修复。",
+      "mode": "offline_non_streaming",
+      "quantization": "int8",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09.tar.bz2",
+        "extract_dir": "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09",
+        "size_mb_estimate": 230
+      },
+      "files": [
+        {
+          "path": "model.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "sense_voice",
+        "sense_voice_model": "model.int8.onnx",
+        "tokens": "tokens.txt",
+        "language": "auto",
+        "use_itn": true,
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "paraformer-zh-int8-2023-09-14",
+      "name": "Paraformer 中文 INT8 2023-09-14",
+      "family": "paraformer",
+      "enabled": true,
+      "recommended": true,
+      "languages": [
+        "zh",
+        "en"
+      ],
+      "description": "中文字幕优先模型，适合中文口播、课程、会议、短视频字幕。体积和速度适合客户端。字幕时间戳建议使用 VAD segment。",
+      "mode": "offline_non_streaming",
+      "quantization": "int8",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-paraformer-zh-2023-09-14.tar.bz2",
+        "extract_dir": "sherpa-onnx-paraformer-zh-2023-09-14",
+        "size_mb_estimate": 234.1
+      },
+      "files": [
+        {
+          "path": "model.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "paraformer",
+        "paraformer_model": "model.int8.onnx",
+        "tokens": "tokens.txt",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-paraformer-zh-2023-09-14/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-2023-09-14.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "paraformer-zh-int8-2024-03-09",
+      "name": "Paraformer 中文 INT8 2024-03-09",
+      "family": "paraformer",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "zh",
+        "en"
+      ],
+      "description": "较新的中文/英文 Paraformer 离线模型，适合中文视频字幕和中英混合字幕。客户端建议优先下载 INT8。",
+      "mode": "offline_non_streaming",
+      "quantization": "int8",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-paraformer-zh-2024-03-09.tar.bz2",
+        "extract_dir": "sherpa-onnx-paraformer-zh-2024-03-09",
+        "size_mb_estimate": 996.6
+      },
+      "files": [
+        {
+          "path": "model.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "paraformer",
+        "paraformer_model": "model.int8.onnx",
+        "tokens": "tokens.txt",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-paraformer-zh-2024-03-09/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-2024-03-09.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "paraformer-zh-small-int8-2024-03-09",
+      "name": "Paraformer 中文 Small INT8",
+      "family": "paraformer",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "zh",
+        "en"
+      ],
+      "description": "Paraformer 小模型，适合低配设备、移动端、对速度和体积更敏感的字幕场景。",
+      "mode": "offline_non_streaming",
+      "quantization": "int8",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2",
+        "extract_dir": "sherpa-onnx-paraformer-zh-small-2024-03-09",
+        "size_mb_estimate": 77.9
+      },
+      "files": [
+        {
+          "path": "model.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "paraformer",
+        "paraformer_model": "model.int8.onnx",
+        "tokens": "tokens.txt",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-paraformer-zh-small-2024-03-09/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "paraformer-trilingual-zh-cantonese-en-int8",
+      "name": "Paraformer 中英粤 INT8",
+      "family": "paraformer",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "zh",
+        "yue",
+        "en"
+      ],
+      "description": "中英粤三语 Paraformer，适合普通话、粤语、英文混合字幕。",
+      "mode": "offline_non_streaming",
+      "quantization": "int8",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-paraformer-trilingual-zh-cantonese-en.tar.bz2",
+        "extract_dir": "sherpa-onnx-paraformer-trilingual-zh-cantonese-en",
+        "size_mb_estimate": 1059.5
+      },
+      "files": [
+        {
+          "path": "model.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "paraformer",
+        "paraformer_model": "model.int8.onnx",
+        "tokens": "tokens.txt",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "modelscope_mirror",
+          "url": "https://www.modelscope.cn/models/pengzhendong/sherpa-onnx-paraformer-trilingual-zh-cantonese-en/resolve/master/",
+          "download_mode": "files"
+        },
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-paraformer-trilingual-zh-cantonese-en/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-trilingual-zh-cantonese-en.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "moonshine-tiny-en-int8",
+      "name": "Moonshine Tiny English INT8",
+      "family": "moonshine",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "en"
+      ],
+      "description": "英文轻量模型，适合低资源设备、实时感较强的英文字幕和语音命令。字幕时间戳使用 VAD segment。",
+      "mode": "offline_non_streaming",
+      "quantization": "int8",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-moonshine-tiny-en-int8.tar.bz2",
+        "extract_dir": "sherpa-onnx-moonshine-tiny-en-int8",
+        "size_mb_estimate": 107.6
+      },
+      "files": [
+        {
+          "path": "preprocess.onnx",
+          "sha256": null
+        },
+        {
+          "path": "encode.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "uncached_decode.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "cached_decode.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "moonshine",
+        "moonshine_preprocessor": "preprocess.onnx",
+        "moonshine_encoder": "encode.int8.onnx",
+        "moonshine_uncached_decoder": "uncached_decode.int8.onnx",
+        "moonshine_cached_decoder": "cached_decode.int8.onnx",
+        "tokens": "tokens.txt",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "global",
+          "provider": "huggingface",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-tiny-en-int8.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "whisper-tiny-en",
+      "name": "Whisper Tiny English",
+      "family": "whisper",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "en"
+      ],
+      "description": "Whisper tiny.en 英文模型，体积最小，适合英文快速字幕和低配设备。准确率低于 base/small/medium。",
+      "mode": "offline_non_streaming",
+      "size": "tiny.en",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-whisper-tiny.en.tar.bz2",
+        "extract_dir": "sherpa-onnx-whisper-tiny.en",
+        "size_mb_estimate": 118.1
+      },
+      "files": [
+        {
+          "path": "tiny.en-encoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tiny.en-decoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tiny.en-encoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tiny.en-decoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tiny.en-tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "whisper",
+        "whisper_encoder": "tiny.en-encoder.int8.onnx",
+        "whisper_decoder": "tiny.en-decoder.int8.onnx",
+        "tokens": "tiny.en-tokens.txt",
+        "language": "en",
+        "task": "transcribe",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "modelscope_mirror",
+          "url": "https://www.modelscope.cn/models/pengzhendong/sherpa-onnx-whisper-tiny.en/resolve/master/",
+          "download_mode": "files"
+        },
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-whisper-tiny.en/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-tiny.en.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "whisper-base-en",
+      "name": "Whisper Base English",
+      "family": "whisper",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "en"
+      ],
+      "description": "Whisper base.en 英文模型，比 tiny.en 更准，体积和速度仍适合桌面端和较好的移动设备。",
+      "mode": "offline_non_streaming",
+      "size": "base.en",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-whisper-base.en.tar.bz2",
+        "extract_dir": "sherpa-onnx-whisper-base.en",
+        "size_mb_estimate": 208.6
+      },
+      "files": [
+        {
+          "path": "base.en-encoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "base.en-decoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "base.en-encoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "base.en-decoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "base.en-tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "whisper",
+        "whisper_encoder": "base.en-encoder.int8.onnx",
+        "whisper_decoder": "base.en-decoder.int8.onnx",
+        "tokens": "base.en-tokens.txt",
+        "language": "en",
+        "task": "transcribe",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "modelscope_mirror",
+          "url": "https://www.modelscope.cn/models/pengzhendong/sherpa-onnx-whisper-base.en/resolve/master/",
+          "download_mode": "files"
+        },
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-whisper-base.en/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.en.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "whisper-small-en",
+      "name": "Whisper Small English",
+      "family": "whisper",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "en"
+      ],
+      "description": "Whisper small.en 英文模型，准确率更好，但客户端资源占用更高。适合桌面端高质量英文字幕。",
+      "mode": "offline_non_streaming",
+      "size": "small.en",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-whisper-small.en.tar.bz2",
+        "extract_dir": "sherpa-onnx-whisper-small.en",
+        "size_mb_estimate": 635.7
+      },
+      "files": [
+        {
+          "path": "small.en-encoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "small.en-decoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "small.en-encoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "small.en-decoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "small.en-tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "whisper",
+        "whisper_encoder": "small.en-encoder.int8.onnx",
+        "whisper_decoder": "small.en-decoder.int8.onnx",
+        "tokens": "small.en-tokens.txt",
+        "language": "en",
+        "task": "transcribe",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "modelscope_mirror",
+          "url": "https://www.modelscope.cn/models/pengzhendong/sherpa-onnx-whisper-small.en/resolve/master/",
+          "download_mode": "files"
+        },
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-whisper-small.en/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.en.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "whisper-medium-en",
+      "name": "Whisper Medium English",
+      "family": "whisper",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "en"
+      ],
+      "description": "Whisper medium.en 英文模型，准确率更高但资源占用大，不建议作为移动端默认模型。",
+      "mode": "offline_non_streaming",
+      "size": "medium.en",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-whisper-medium.en.tar.bz2",
+        "extract_dir": "sherpa-onnx-whisper-medium.en",
+        "size_mb_estimate": 1905.9
+      },
+      "files": [
+        {
+          "path": "medium.en-encoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "medium.en-decoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "medium.en-encoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "medium.en-decoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "medium.en-tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "whisper",
+        "whisper_encoder": "medium.en-encoder.int8.onnx",
+        "whisper_decoder": "medium.en-decoder.int8.onnx",
+        "tokens": "medium.en-tokens.txt",
+        "language": "en",
+        "task": "transcribe",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "modelscope_mirror",
+          "url": "https://www.modelscope.cn/models/pengzhendong/sherpa-onnx-whisper-medium.en/resolve/master/",
+          "download_mode": "files"
+        },
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-whisper-medium.en/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-medium.en.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "whisper-distil-small-en",
+      "name": "Whisper Distil Small English",
+      "family": "whisper",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "en"
+      ],
+      "description": "蒸馏版 Whisper small.en，适合希望在英文准确率和速度之间折中的客户端场景。",
+      "mode": "offline_non_streaming",
+      "size": "distil-small.en",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-whisper-distil-small.en.tar.bz2",
+        "extract_dir": "sherpa-onnx-whisper-distil-small.en",
+        "size_mb_estimate": 453.7
+      },
+      "files": [
+        {
+          "path": "distil-small.en-encoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "distil-small.en-decoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "distil-small.en-encoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "distil-small.en-decoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "distil-small.en-tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "whisper",
+        "whisper_encoder": "distil-small.en-encoder.int8.onnx",
+        "whisper_decoder": "distil-small.en-decoder.int8.onnx",
+        "tokens": "distil-small.en-tokens.txt",
+        "language": "en",
+        "task": "transcribe",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "modelscope_mirror",
+          "url": "https://www.modelscope.cn/models/pengzhendong/sherpa-onnx-whisper-distil-small.en/resolve/master/",
+          "download_mode": "files"
+        },
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-whisper-distil-small.en/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-distil-small.en.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "whisper-distil-medium-en",
+      "name": "Whisper Distil Medium English",
+      "family": "whisper",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "en"
+      ],
+      "description": "蒸馏版 Whisper medium.en，适合桌面端英文高质量字幕，速度优于原 medium.en。",
+      "mode": "offline_non_streaming",
+      "size": "distil-medium.en",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-whisper-distil-medium.en.tar.bz2",
+        "extract_dir": "sherpa-onnx-whisper-distil-medium.en",
+        "size_mb_estimate": 1007.3
+      },
+      "files": [
+        {
+          "path": "distil-medium.en-encoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "distil-medium.en-decoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "distil-medium.en-encoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "distil-medium.en-decoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "distil-medium.en-tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "whisper",
+        "whisper_encoder": "distil-medium.en-encoder.int8.onnx",
+        "whisper_decoder": "distil-medium.en-decoder.int8.onnx",
+        "tokens": "distil-medium.en-tokens.txt",
+        "language": "en",
+        "task": "transcribe",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "modelscope_mirror",
+          "url": "https://www.modelscope.cn/models/pengzhendong/sherpa-onnx-whisper-distil-medium.en/resolve/master/",
+          "download_mode": "files"
+        },
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-whisper-distil-medium.en/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-distil-medium.en.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "whisper-tiny-multilingual",
+      "name": "Whisper Tiny Multilingual",
+      "family": "whisper",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "multi"
+      ],
+      "description": "Whisper tiny 多语种模型。体积小，但中文等非英文准确率可能不如 SenseVoice/Paraformer，适合作为多语种兜底。",
+      "mode": "offline_non_streaming",
+      "size": "tiny",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-whisper-tiny.tar.bz2",
+        "extract_dir": "sherpa-onnx-whisper-tiny",
+        "size_mb_estimate": 116.2
+      },
+      "files": [
+        {
+          "path": "tiny-encoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tiny-decoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tiny-encoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tiny-decoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tiny-tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "whisper",
+        "whisper_encoder": "tiny-encoder.int8.onnx",
+        "whisper_decoder": "tiny-decoder.int8.onnx",
+        "tokens": "tiny-tokens.txt",
+        "language": "auto",
+        "task": "transcribe",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "modelscope_mirror",
+          "url": "https://www.modelscope.cn/models/pengzhendong/sherpa-onnx-whisper-tiny/resolve/master/",
+          "download_mode": "files"
+        },
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-whisper-tiny/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-tiny.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "whisper-base-multilingual",
+      "name": "Whisper Base Multilingual",
+      "family": "whisper",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "multi"
+      ],
+      "description": "Whisper base 多语种模型，比 tiny 更准，适合作为中低配设备的多语种兜底模型。",
+      "mode": "offline_non_streaming",
+      "size": "base",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-whisper-base.tar.bz2",
+        "extract_dir": "sherpa-onnx-whisper-base",
+        "size_mb_estimate": 207.6
+      },
+      "files": [
+        {
+          "path": "base-encoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "base-decoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "base-encoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "base-decoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "base-tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "whisper",
+        "whisper_encoder": "base-encoder.int8.onnx",
+        "whisper_decoder": "base-decoder.int8.onnx",
+        "tokens": "base-tokens.txt",
+        "language": "auto",
+        "task": "transcribe",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "modelscope_mirror",
+          "url": "https://www.modelscope.cn/models/pengzhendong/sherpa-onnx-whisper-base/resolve/master/",
+          "download_mode": "files"
+        },
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-whisper-base/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "whisper-small-multilingual",
+      "name": "Whisper Small Multilingual",
+      "family": "whisper",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "multi"
+      ],
+      "description": "Whisper small 多语种模型，适合桌面端多语种字幕。中文场景仍建议优先 SenseVoice/Paraformer。",
+      "mode": "offline_non_streaming",
+      "size": "small",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-whisper-small.tar.bz2",
+        "extract_dir": "sherpa-onnx-whisper-small",
+        "size_mb_estimate": 639.4
+      },
+      "files": [
+        {
+          "path": "small-encoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "small-decoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "small-encoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "small-decoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "small-tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "whisper",
+        "whisper_encoder": "small-encoder.int8.onnx",
+        "whisper_decoder": "small-decoder.int8.onnx",
+        "tokens": "small-tokens.txt",
+        "language": "auto",
+        "task": "transcribe",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "modelscope_mirror",
+          "url": "https://www.modelscope.cn/models/pengzhendong/sherpa-onnx-whisper-small/resolve/master/",
+          "download_mode": "files"
+        },
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-whisper-small/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "whisper-medium-multilingual",
+      "name": "Whisper Medium Multilingual",
+      "family": "whisper",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "multi"
+      ],
+      "description": "Whisper medium 多语种模型，资源占用较高，适合桌面端高质量多语种字幕，不适合作为移动端默认选项。",
+      "mode": "offline_non_streaming",
+      "size": "medium",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-whisper-medium.tar.bz2",
+        "extract_dir": "sherpa-onnx-whisper-medium",
+        "size_mb_estimate": 1931.4
+      },
+      "files": [
+        {
+          "path": "medium-encoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "medium-decoder.onnx",
+          "sha256": null
+        },
+        {
+          "path": "medium-encoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "medium-decoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "medium-tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "whisper",
+        "whisper_encoder": "medium-encoder.int8.onnx",
+        "whisper_decoder": "medium-decoder.int8.onnx",
+        "tokens": "medium-tokens.txt",
+        "language": "auto",
+        "task": "transcribe",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "modelscope_mirror",
+          "url": "https://www.modelscope.cn/models/pengzhendong/sherpa-onnx-whisper-medium/resolve/master/",
+          "download_mode": "files"
+        },
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-whisper-medium/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-medium.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "telespeech-ctc-int8-zh-2024-06-04",
+      "name": "TeleSpeech CTC 中文 INT8",
+      "family": "telespeech_ctc",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "zh"
+      ],
+      "description": "中文 CTC 模型，支持多种中文方言，适合作为中文方言字幕备选模型。",
+      "mode": "offline_non_streaming",
+      "quantization": "int8",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-telespeech-ctc-int8-zh-2024-06-04.tar.bz2",
+        "extract_dir": "sherpa-onnx-telespeech-ctc-int8-zh-2024-06-04",
+        "size_mb_estimate": 183.2
+      },
+      "files": [
+        {
+          "path": "model.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "telespeech_ctc",
+        "telespeech_ctc_model": "model.int8.onnx",
+        "tokens": "tokens.txt",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-telespeech-ctc-int8-zh-2024-06-04/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-telespeech-ctc-int8-zh-2024-06-04.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "zipformer-ctc-zh-int8-2025-07-03",
+      "name": "Zipformer CTC 中文 INT8",
+      "family": "zipformer_ctc",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "zh"
+      ],
+      "description": "中文 Zipformer CTC 模型，适合中文离线字幕备选。建议实际测试 CER、速度和字幕切分效果后再开放给普通用户。",
+      "mode": "offline_non_streaming",
+      "quantization": "int8",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-zipformer-ctc-zh-int8-2025-07-03.tar.bz2",
+        "extract_dir": "sherpa-onnx-zipformer-ctc-zh-int8-2025-07-03",
+        "size_mb_estimate": 301.4
+      },
+      "files": [
+        {
+          "path": "model.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "zipformer_ctc",
+        "zipformer_ctc_model": "model.int8.onnx",
+        "tokens": "tokens.txt",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 2
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-zipformer-ctc-zh-int8-2025-07-03/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-ctc-zh-int8-2025-07-03.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "parakeet-tdt-0-6b-v3-int8",
+      "name": "NVIDIA Parakeet TDT 0.6B v3 INT8",
+      "family": "nemo_transducer",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "en",
+        "multi_european"
+      ],
+      "description": "英文/欧洲语种高质量模型，适合桌面端英文字幕。模型较大，不适合低配移动端默认下载。",
+      "mode": "offline_non_streaming",
+      "quantization": "int8",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
+        "extract_dir": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+        "size_mb_estimate": 487.2
+      },
+      "files": [
+        {
+          "path": "encoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "decoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "joiner.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "nemo_transducer",
+        "encoder": "encoder.int8.onnx",
+        "decoder": "decoder.int8.onnx",
+        "joiner": "joiner.int8.onnx",
+        "tokens": "tokens.txt",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 4
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2"
+        }
+      ]
+    },
+    {
+      "id": "firered-asr-large-zh-en-2025-02-16",
+      "name": "FireRedASR Large 中文/英文",
+      "family": "fire_red_asr",
+      "enabled": true,
+      "recommended": false,
+      "languages": [
+        "zh",
+        "en"
+      ],
+      "description": "中文/英文高质量模型，适合中英混说、中文高准确率字幕、方言或复杂音频。模型较大，建议作为高级模型下载。",
+      "mode": "offline_non_streaming",
+      "quantization": "int8_or_fp16",
+      "supports_subtitle": true,
+      "timestamp": {
+        "level": "segment",
+        "source": "vad",
+        "required_vad": true,
+        "token_timestamp_verified": false
+      },
+      "artifact": {
+        "archive_name": "sherpa-onnx-fire-red-asr-large-zh_en-2025-02-16.tar.bz2",
+        "extract_dir": "sherpa-onnx-fire-red-asr-large-zh_en-2025-02-16",
+        "size_mb_estimate": 1469.5
+      },
+      "files": [
+        {
+          "path": "encoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "decoder.int8.onnx",
+          "sha256": null
+        },
+        {
+          "path": "tokens.txt",
+          "sha256": null
+        }
+      ],
+      "recognizer_config": {
+        "model_type": "fire_red_asr",
+        "fire_red_asr_encoder": "encoder.int8.onnx",
+        "fire_red_asr_decoder": "decoder.int8.onnx",
+        "tokens": "tokens.txt",
+        "sample_rate": 16000,
+        "feature_dim": 80,
+        "num_threads": 4
+      },
+      "download_sources": [
+        {
+          "region": "cn",
+          "provider": "hf_mirror",
+          "url": "https://hf-mirror.com/csukuangfj/sherpa-onnx-fire-red-asr-large-zh_en-2025-02-16/resolve/main/",
+          "download_mode": "files"
+        },
+        {
+          "region": "global",
+          "provider": "github_release",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-fire-red-asr-large-zh_en-2025-02-16.tar.bz2"
+        }
+      ]
+    }
+  ]
+}

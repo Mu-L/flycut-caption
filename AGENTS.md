@@ -89,6 +89,7 @@ This is a React + TypeScript + Vite project with modern UI tooling:
 
 - **模型文件不等于可执行程序**：FunASR 模型目录只包含 `model.int8.onnx`、`tokens.txt` 等模型资产；真实识别还需要 `funasr-asr` sidecar 可执行程序。
 - **sidecar 必须通过脚本构建**：运行 Tauri 前应使用 `pnpm build:funasr-sidecar`，它会构建 `src-tauri/sidecars/funasr-asr` 并复制到 `src-tauri/binaries/funasr-asr`。
+- **FFmpeg 内置打包**：运行 Tauri 前使用 `pnpm fetch:ffmpeg`，将静态 FFmpeg 下载到 `src-tauri/binaries/ffmpeg`（Windows 为 `ffmpeg.exe`），随 `binaries/*` 打入安装包；`video.rs` 与 FunASR sidecar（`FFMPEG_PATH` 环境变量）均优先使用内置副本。
 - **不要在 Tauri command 中同步执行耗时 ASR**：真实 ASR 推理、`ffmpeg` 转码、`Command::output()` 等阻塞操作必须放入 `tauri::async_runtime::spawn_blocking(...)`，避免上传视频后 UI/窗口卡死。
 - **Tauri 文件上传要使用原生路径**：FunASR Tauri 引擎需要本地文件路径，前端应通过 `pick_media_file` 获取路径并写入 `VideoFile.path`，不要依赖浏览器 `File` 的 ArrayBuffer 路径。
 - **前端进度回调要绑定所有 ASR 引擎**：`ASRService.setProgressCallback` 应同时绑定 Transformers 与 FunASR 引擎，避免切换引擎后 `complete/error` 状态无法回传，导致 UI 一直停在 loading。

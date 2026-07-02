@@ -72,6 +72,14 @@ export class ASRService {
   }
 
   /**
+   * 设置 Web (Transformers) 引擎当前要使用的模型（按 Web 短 id）
+   * 例如 'whisper-small' / 'moonshine-tiny'。会触发下次 loadModel 时重新加载。
+   */
+  public setWebModel(webModelId: string) {
+    this.transformersEngine.setWebModel(webModelId);
+  }
+
+  /**
    * 获取当前设备类型
    */
   public getCurrentDevice(): ASRDevice {
@@ -91,12 +99,17 @@ export class ASRService {
 
   /**
    * 加载模型
+   * - transformers 引擎：modelId 为 Web 短 id（可选，会先 setWebModel 再 loadModel）
+   * - funasr-tauri 引擎：modelId 为 manifest 中的模型 id
    */
   public async loadModel(modelId?: string): Promise<void> {
-    console.log('ASR开始加载模型:', this.currentEngineType, this.currentDevice);
+    console.log('ASR开始加载模型:', this.currentEngineType, this.currentDevice, modelId);
     if (this.currentEngineType === 'funasr-tauri') {
       await this.funasrTauriEngine.loadModel(modelId);
     } else {
+      if (modelId) {
+        this.transformersEngine.setWebModel(modelId);
+      }
       await this.transformersEngine.loadModel();
     }
     console.log('ASR模型加载完成');
@@ -107,11 +120,24 @@ export class ASRService {
    */
   public async prepareModel(modelId?: string): Promise<void> {
     const engine = this.getEngine();
-    console.log('ASR准备模型:', this.currentEngineType);
+    console.log('ASR准备模型:', this.currentEngineType, modelId);
 
     if (this.currentEngineType === 'funasr-tauri') {
       await this.loadModel(modelId);
       return;
+    }
+
+    // transformers：若调用方指定的模型与当前已加载的不同，需要重新加载
+    if (modelId) {
+      const currentConfig = this.transformersEngine.getConfig();
+      const currentHFId = currentConfig.modelId;
+      const targetMeta = WEB_ASR_MODEL_LOOKUP[modelId];
+      if (targetMeta && targetMeta.modelId !== currentHFId) {
+        this.transformersEngine.setWebModel(modelId);
+        // 切换模型后视为未加载，强制走 loadModel 分支
+        await this.loadModel();
+        return;
+      }
     }
 
     if (!engine.isReady()) {
@@ -175,7 +201,7 @@ export class ASRService {
     language: string = 'en',
     modelId?: string
   ): Promise<SubtitleTranscript> {
-    await this.prepareModel();
+    await this.prepareModel(modelId);
     return this.transcribeAudio(audioBuffer, language, modelId);
   }
 
@@ -187,26 +213,38 @@ export class ASRService {
   }
 
   /**
-   * 检查 Whisper 模型是否已加载（当前会话）
+   * 检查当前 Web (Transformers) 模型是否已加载（当前会话）
    */
   public isWhisperReady(): boolean {
     return this.transformersEngine.isReady();
   }
 
   /**
-   * 预下载 Whisper 模型（不影响当前引擎选择）
-   * 进度通过 progressCallback 返回
+   * 检查指定 Web 模型是否已加载（当前会话）
    */
-  public async preloadWhisperModel(device?: ASRDevice): Promise<void> {
+  public isWebModelReady(webModelId: string): boolean {
+    if (!this.transformersEngine.isReady()) return false;
+    const meta = WEB_ASR_MODEL_LOOKUP[webModelId];
+    if (!meta) return false;
+    return this.transformersEngine.getConfig().modelId === meta.modelId;
+  }
+
+  /**
+   * 预下载（预加载）Web 模型。modelId 为 Web 短 id 或 HF modelId。
+   * 不影响当前引擎选择，进度通过 progressCallback 返回。
+   */
+  public async preloadWebModel(webModelId?: string, device?: ASRDevice): Promise<void> {
+    if (webModelId) {
+      this.transformersEngine.setWebModel(webModelId);
+    }
     if (device) {
       this.transformersEngine.setConfig({ device });
     }
-    // 保存当前回调，确保进度能传到调用方
     await this.transformersEngine.loadModel();
   }
 
   /**
-   * 为 Whisper 预下载设置进度回调
+   * 为 Web 模型预下载设置进度回调
    */
   public setWhisperProgressCallback(callback: (progress: ASRProgress) => void) {
     this.transformersEngine.setProgressCallback(callback);
@@ -221,6 +259,12 @@ export class ASRService {
     this.funasrTauriEngine.destroy();
   }
 }
+
+// 内部：Web 短 id → 模型元信息，避免 service 层循环依赖
+import { WEB_ASR_MODELS } from '@/config/webAsrModels';
+const WEB_ASR_MODEL_LOOKUP: Record<string, { modelId: string }> = Object.fromEntries(
+  WEB_ASR_MODELS.map((m) => [m.id, { modelId: m.modelId }]),
+);
 
 // 全局单例
 export const asrService = new ASRService();

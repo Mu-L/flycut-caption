@@ -3,71 +3,18 @@ import { cn } from '@/lib/utils';
 import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useTranslation } from '@/contexts/LocaleProvider';
-
-export interface SubtitleStyle {
-  // 字体设置
-  fontSize: number;
-  fontFamily: string;
-  fontWeight: 'normal' | 'bold';
-  fontStyle: 'normal' | 'italic';
-
-  // 颜色设置
-  color: string;
-  backgroundColor: string;
-  borderColor: string;
-  shadowColor: string;
-
-  // 布局设置
-  textAlign: 'left' | 'center' | 'right';
-  lineHeight: number;
-  letterSpacing: number;
-
-  // 边框和阴影
-  borderWidth: number;
-  shadowOffsetX: number;
-  shadowOffsetY: number;
-  shadowBlur: number;
-
-  // 背景
-  backgroundOpacity: number;
-  backgroundRadius: number;
-  backgroundPadding: number;
-
-  // 位置
-  bottomOffset: number; // 距离底部的偏移量
-
-  // 显示设置
-  visible: boolean;
-}
-
-export const defaultSubtitleStyle: SubtitleStyle = {
-  fontSize: 24,
-  fontFamily: 'Arial, sans-serif',
-  fontWeight: 'bold',
-  fontStyle: 'normal',
-
-  color: '#FFFFFF',
-  backgroundColor: '#000000',
-  borderColor: '#000000',
-  shadowColor: '#000000',
-
-  textAlign: 'center',
-  lineHeight: 1.2,
-  letterSpacing: 0,
-
-  borderWidth: 1,
-  shadowOffsetX: 1,
-  shadowOffsetY: 1,
-  shadowBlur: 2,
-
-  backgroundOpacity: 0.8,
-  backgroundRadius: 4,
-  backgroundPadding: 8,
-
-  bottomOffset: 60,
-
-  visible: true,
-};
+import { SUBTITLE_FONTS } from '@/config/subtitleFonts';
+import {
+  type SubtitleStyle,
+  fontSizeAtReference,
+  bottomOffsetAtReference,
+  fontSizeRatioFromReference,
+  bottomOffsetRatioFromReference,
+  ASPECT_PRESETS,
+  STYLE_PRESETS,
+  applyAspectPreset,
+  applyStylePreset,
+} from '@/subtitle';
 
 interface SubtitleSettingsProps {
   style: SubtitleStyle;
@@ -75,7 +22,6 @@ interface SubtitleSettingsProps {
   className?: string;
 }
 
-// Custom Aimu Toggle
 function AimuToggle({ checked, onChange, label }: { checked: boolean, onChange: (c: boolean) => void, label?: string }) {
   return (
     <div className="flex items-center gap-2">
@@ -105,7 +51,6 @@ function AimuToggle({ checked, onChange, label }: { checked: boolean, onChange: 
   );
 }
 
-// Custom Color Picker Block
 function ColorBlock({ label, value, onChange }: { label: string, value: string, onChange: (v: string) => void }) {
   return (
     <div className="flex flex-col items-center gap-1">
@@ -123,7 +68,6 @@ function ColorBlock({ label, value, onChange }: { label: string, value: string, 
   );
 }
 
-// Custom Slider Row
 function SliderRow({ label, value, min, max, onChange }: { label: string, value: number, min: number, max: number, onChange: (v: number) => void }) {
   return (
     <div className="flex items-center gap-2 h-6">
@@ -151,9 +95,11 @@ export function SubtitleSettings({
     onStyleChange({ ...style, ...updates });
   }, [style, onStyleChange]);
 
+  const fontSizeDisplay = fontSizeAtReference(style);
+  const bottomOffsetDisplay = bottomOffsetAtReference(style);
+
   return (
     <div className={cn("bg-transparent text-aimu-text-primary text-xs p-3 space-y-3", className)}>
-      {/* 1. 颜色 (Colors) */}
       <div className="flex items-start gap-2">
         <div className="w-12 font-bold mt-1 shrink-0">{t('components.workstation.colors')}:</div>
         <div className="flex gap-4">
@@ -164,76 +110,131 @@ export function SubtitleSettings({
         </div>
       </div>
 
-      {/* 2. 尺寸 (Sizes) */}
       <div className="flex items-start gap-2">
         <div className="w-12 font-bold mt-1 shrink-0">{t('components.workstation.sizes')}:</div>
         <div className="flex-1 space-y-1.5">
-          <SliderRow label={t('components.subtitleEditor.fontSize')} value={style.fontSize} min={14} max={30} onChange={(v) => updateStyle({ fontSize: v })} />
+          <SliderRow
+            label={t('components.subtitleEditor.fontSize')}
+            value={fontSizeDisplay}
+            min={18}
+            max={72}
+            onChange={(v) => updateStyle({ fontSizeRatio: fontSizeRatioFromReference(v) })}
+          />
           <SliderRow label={t('components.workstation.letterSpacing')} value={style.letterSpacing} min={0} max={5} onChange={(v) => updateStyle({ letterSpacing: v })} />
-          <SliderRow label={t('components.workstation.bottomOffset')} value={style.bottomOffset} min={0} max={100} onChange={(v) => updateStyle({ bottomOffset: v })} />
+          <SliderRow
+            label={t('components.workstation.bottomOffset')}
+            value={bottomOffsetDisplay}
+            min={0}
+            max={160}
+            onChange={(v) => updateStyle({ bottomOffsetRatio: bottomOffsetRatioFromReference(v) })}
+          />
         </div>
       </div>
 
-      {/* 3. 阴影 (Shadow) */}
       <div className="flex items-start gap-2">
         <div className="w-12 font-bold mt-1 shrink-0">{t('components.subtitleEditor.shadow')}:</div>
         <div className="flex-1 space-y-1.5">
           <div className="flex items-center h-6">
-            <AimuToggle 
+            <AimuToggle
               label={t('components.workstation.background')}
-              checked={style.backgroundOpacity > 0} 
-              onChange={(c) => updateStyle({ backgroundOpacity: c ? 0.8 : 0 })} 
+              checked={style.backgroundOpacity > 0}
+              onChange={(c) => updateStyle({ backgroundOpacity: c ? 0.8 : 0 })}
             />
           </div>
-          <SliderRow 
+          <SliderRow
             label={t('components.workstation.opacity')}
-            value={Math.round(style.backgroundOpacity * 250)} 
-            min={0} 
-            max={250} 
-            onChange={(v) => updateStyle({ backgroundOpacity: v / 250 })} 
+            value={Math.round(style.backgroundOpacity * 250)}
+            min={0}
+            max={250}
+            onChange={(v) => updateStyle({ backgroundOpacity: v / 250 })}
           />
-          <SliderRow 
+          <SliderRow
             label={t('components.workstation.outline')}
-            value={style.borderWidth} 
-            min={1} 
-            max={3} 
-            onChange={(v) => updateStyle({ borderWidth: v })} 
+            value={style.borderWidth}
+            min={1}
+            max={3}
+            onChange={(v) => updateStyle({ borderWidth: v })}
           />
-          <SliderRow 
+          <SliderRow
             label={t('components.workstation.offset')}
-            value={style.shadowOffsetX} 
-            min={0} 
-            max={3} 
-            onChange={(v) => updateStyle({ shadowOffsetX: v, shadowOffsetY: v })} 
+            value={style.shadowOffsetX}
+            min={0}
+            max={3}
+            onChange={(v) => updateStyle({ shadowOffsetX: v, shadowOffsetY: v })}
           />
         </div>
       </div>
 
-      {/* 4. 字体 (Font) */}
       <div className="flex items-start gap-2">
-        <div className="w-12 font-bold mt-1 shrink-0">{t('components.workstation.font')}:</div>
+        <div className="w-12 font-bold mt-1 shrink-0">预设:</div>
         <div className="flex-1 flex flex-col gap-2">
-          <Select value={style.fontFamily} onValueChange={(v) => updateStyle({ fontFamily: v })}>
+          <Select
+            value={style.aspectPreset}
+            onValueChange={(v) => onStyleChange(applyAspectPreset(style, v as SubtitleStyle['aspectPreset']))}
+          >
             <SelectTrigger className="h-7 text-xs px-2 py-0 bg-aimu-input border-aimu-border w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="Arial, sans-serif" className="text-xs">Arial</SelectItem>
-              <SelectItem value="'Microsoft YaHei', sans-serif" className="text-xs">微软雅黑</SelectItem>
-              <SelectItem value="'PingFang SC', sans-serif" className="text-xs">苹方</SelectItem>
-              <SelectItem value="'Source Han Sans', sans-serif" className="text-xs">思源黑体(正常)</SelectItem>
+              {ASPECT_PRESETS.map((preset) => (
+                <SelectItem key={preset.id} value={preset.id} className="text-xs">
+                  {preset.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
+          <Select
+            onValueChange={(v) => onStyleChange(applyStylePreset(style, v as typeof STYLE_PRESETS[number]['id']))}
+          >
+            <SelectTrigger className="h-7 text-xs px-2 py-0 bg-aimu-input border-aimu-border w-full">
+              <SelectValue placeholder="应用样式预设…" />
+            </SelectTrigger>
+            <SelectContent>
+              {STYLE_PRESETS.map((preset) => (
+                <SelectItem key={preset.id} value={preset.id} className="text-xs">
+                  {preset.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="flex items-start gap-2">
+        <div className="w-12 font-bold mt-1 shrink-0">{t('components.workstation.font')}:</div>
+        <div className="flex-1 flex flex-col gap-2">
+          <Select value={style.fontId} onValueChange={(v) => updateStyle({ fontId: v })}>
+            <SelectTrigger className="h-7 text-xs px-2 py-0 bg-aimu-input border-aimu-border w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SUBTITLE_FONTS.map((font) => (
+                <SelectItem key={font.id} value={font.id} className="text-xs">
+                  <span className="flex items-center gap-1.5">
+                    <span style={{ fontFamily: font.family }}>{font.label}</span>
+                    {font.recommended && (
+                      <span className="text-[10px] px-1 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                        推荐
+                      </span>
+                    )}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[10px] text-aimu-text-muted leading-snug">
+            字号按 1080p 参考显示；不同分辨率视频自动保持相同画面比例。
+          </p>
           <div className="flex items-center gap-4 mt-1">
-            <AimuToggle 
+            <AimuToggle
               label={t('components.workstation.bold')}
-              checked={style.fontWeight === 'bold'} 
-              onChange={(c) => updateStyle({ fontWeight: c ? 'bold' : 'normal' })} 
+              checked={style.fontWeight === 'bold'}
+              onChange={(c) => updateStyle({ fontWeight: c ? 'bold' : 'normal' })}
             />
-            <AimuToggle 
+            <AimuToggle
               label={t('components.workstation.italic')}
-              checked={style.fontStyle === 'italic'} 
-              onChange={(c) => updateStyle({ fontStyle: c ? 'italic' : 'normal' })} 
+              checked={style.fontStyle === 'italic'}
+              onChange={(c) => updateStyle({ fontStyle: c ? 'italic' : 'normal' })}
             />
           </div>
         </div>

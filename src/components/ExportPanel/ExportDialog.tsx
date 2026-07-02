@@ -1,6 +1,6 @@
 // 导出设置对话框组件
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { 
   Dialog,
@@ -18,6 +18,7 @@ import {
   AlertCircle,
   CheckCircle
 } from 'lucide-react';
+import { isTauriRuntime } from '@/utils/runtime';
 
 export interface VideoExportOptions {
   format: 'mp4' | 'webm';
@@ -29,8 +30,19 @@ interface ExportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   exportType: 'subtitles' | 'video';
-  onExportSubtitles: (format: 'srt' | 'json') => void;
+  onExportSubtitles: (format: 'srt' | 'json' | 'vtt' | 'ass') => void;
   onExportVideo: (options: VideoExportOptions) => void;
+}
+
+interface ExportEnvironment {
+  isTauri: boolean;
+  ffmpegAvailable: boolean;
+  ffmpegError?: string;
+  ffmpegSource?: 'bundled' | 'system';
+  ffmpegVersion?: string;
+  webHardBurn: boolean;
+  tauriSoftBurn: boolean;
+  tauriHardBurn: boolean;
 }
 
 export function ExportDialog({
@@ -46,15 +58,108 @@ export function ExportDialog({
     subtitleProcessing: 'none',
   });
 
-  const handleSubtitleExport = (format: 'srt' | 'json') => {
+  const [env, setEnv] = useState<ExportEnvironment>({
+    isTauri: isTauriRuntime(),
+    ffmpegAvailable: !isTauriRuntime(),
+    webHardBurn: !isTauriRuntime(),
+    tauriSoftBurn: false,
+    tauriHardBurn: false,
+  });
+
+  useEffect(() => {
+    if (!open || exportType !== 'video') return;
+
+    const isTauri = isTauriRuntime();
+    if (!isTauri) {
+      setEnv({
+        isTauri: false,
+        ffmpegAvailable: true,
+        webHardBurn: true,
+        tauriSoftBurn: false,
+        tauriHardBurn: false,
+      });
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const status = await invoke<{
+          available: boolean;
+          error?: string;
+          source?: 'bundled' | 'system';
+          version?: string;
+        }>('check_ffmpeg_environment');
+        if (cancelled) return;
+        setEnv({
+          isTauri: true,
+          ffmpegAvailable: status.available,
+          ffmpegError: status.error,
+          ffmpegSource: status.source,
+          ffmpegVersion: status.version,
+          webHardBurn: false,
+          tauriSoftBurn: status.available,
+          tauriHardBurn: status.available,
+        });
+      } catch (error) {
+        if (cancelled) return;
+        setEnv({
+          isTauri: true,
+          ffmpegAvailable: false,
+          ffmpegError: error instanceof Error ? error.message : 'FFmpeg 环境检查失败',
+          webHardBurn: false,
+          tauriSoftBurn: false,
+          tauriHardBurn: false,
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, exportType]);
+
+  const softBurnAvailable = env.isTauri ? env.tauriSoftBurn : false;
+  const hardBurnAvailable = env.isTauri ? env.tauriHardBurn : env.webHardBurn;
+  const canExportVideo = env.isTauri ? env.ffmpegAvailable : true;
+
+  const handleSubtitleExport = (format: 'srt' | 'json' | 'vtt' | 'ass') => {
     onExportSubtitles(format);
     onOpenChange(false);
   };
 
   const handleVideoExport = () => {
+    if (!canExportVideo) return;
     onExportVideo(videoOptions);
     onOpenChange(false);
   };
+
+  const renderSubtitleOption = (
+    mode: VideoExportOptions['subtitleProcessing'],
+    title: string,
+    description: string,
+    enabled: boolean,
+    disabledHint?: string,
+  ) => (
+    <button
+      type="button"
+      disabled={!enabled}
+      onClick={() => enabled && setVideoOptions(prev => ({ ...prev, subtitleProcessing: mode }))}
+      className={cn(
+        'w-full p-3 border rounded-lg text-left transition-colors',
+        !enabled && 'opacity-50 cursor-not-allowed',
+        enabled && videoOptions.subtitleProcessing === mode
+          ? 'border-primary bg-primary/10'
+          : enabled && 'hover:bg-muted/50'
+      )}
+    >
+      <div className="font-semibold">{title}</div>
+      <div className="text-xs text-muted-foreground">
+        {enabled ? description : (disabledHint ?? description)}
+      </div>
+    </button>
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -82,7 +187,6 @@ export function ExportDialog({
 
         <div className="py-4">
           {exportType === 'subtitles' ? (
-            /* 字幕导出选项 */
             <div className="space-y-4">
               <div className="grid grid-cols-1 gap-3">
                 <button
@@ -116,6 +220,38 @@ export function ExportDialog({
                   </div>
                   <Download className="w-4 h-4 text-muted-foreground" />
                 </button>
+
+                <button
+                  onClick={() => handleSubtitleExport('vtt')}
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-purple-100 dark:bg-purple-900/30 rounded-lg flex items-center justify-center">
+                      <FileText className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                    </div>
+                    <div className="text-left">
+                      <div className="font-semibold">VTT 格式</div>
+                      <div className="text-sm text-muted-foreground">Web 视频标准字幕</div>
+                    </div>
+                  </div>
+                  <Download className="w-4 h-4 text-muted-foreground" />
+                </button>
+
+                <button
+                  onClick={() => handleSubtitleExport('ass')}
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-orange-100 dark:bg-orange-900/30 rounded-lg flex items-center justify-center">
+                      <FileText className="w-5 h-5 text-orange-600 dark:text-orange-400" />
+                    </div>
+                    <div className="text-left">
+                      <div className="font-semibold">ASS 格式</div>
+                      <div className="text-sm text-muted-foreground">含样式，适合专业剪辑</div>
+                    </div>
+                  </div>
+                  <Download className="w-4 h-4 text-muted-foreground" />
+                </button>
               </div>
 
               <div className="flex items-start space-x-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm">
@@ -129,9 +265,35 @@ export function ExportDialog({
               </div>
             </div>
           ) : (
-            /* 视频导出选项 */
             <div className="space-y-4">
-              {/* 格式选择 */}
+              {env.isTauri && !env.ffmpegAvailable && (
+                <div className="flex items-start space-x-2 p-3 bg-destructive/10 rounded-lg text-sm">
+                  <AlertCircle className="w-4 h-4 text-destructive mt-0.5 flex-shrink-0" />
+                  <div>
+                    <div className="font-medium text-destructive">未检测到 FFmpeg</div>
+                    <div className="text-muted-foreground mt-1">
+                      {env.ffmpegError ?? '请运行 pnpm fetch:ffmpeg 下载内置 FFmpeg，或安装系统 ffmpeg。'}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {env.isTauri && env.ffmpegAvailable && (
+                <div className="flex items-start space-x-2 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg text-sm">
+                  <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <div className="font-medium text-green-900 dark:text-green-100">
+                      FFmpeg {env.ffmpegSource === 'bundled' ? '（内置）' : '（系统）'} 就绪
+                    </div>
+                    {env.ffmpegVersion && (
+                      <div className="text-green-700 dark:text-green-300 mt-1 text-xs">
+                        {env.ffmpegVersion}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <label className="text-sm font-medium">输出格式</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -162,7 +324,6 @@ export function ExportDialog({
                 </div>
               </div>
 
-              {/* 质量选择 */}
               <div className="space-y-2">
                 <label className="text-sm font-medium">输出质量</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -183,58 +344,37 @@ export function ExportDialog({
                 </div>
               </div>
 
-              {/* 字幕处理选项 */}
               <div className="space-y-2">
                 <label className="text-sm font-medium">字幕处理</label>
                 <div className="space-y-2">
-                  <button
-                    onClick={() => setVideoOptions(prev => ({ ...prev, subtitleProcessing: 'none' }))}
-                    className={cn(
-                      'w-full p-3 border rounded-lg text-left transition-colors',
-                      videoOptions.subtitleProcessing === 'none'
-                        ? 'border-primary bg-primary/10'
-                        : 'hover:bg-muted/50'
-                    )}
-                  >
-                    <div className="font-semibold">无字幕</div>
-                    <div className="text-xs text-muted-foreground">不处理字幕，仅导出视频</div>
-                  </button>
-                  
-                  <button
-                    onClick={() => setVideoOptions(prev => ({ ...prev, subtitleProcessing: 'soft' }))}
-                    className={cn(
-                      'w-full p-3 border rounded-lg text-left transition-colors',
-                      videoOptions.subtitleProcessing === 'soft'
-                        ? 'border-primary bg-primary/10'
-                        : 'hover:bg-muted/50'
-                    )}
-                  >
-                    <div className="font-semibold">软烧录</div>
-                    <div className="text-xs text-muted-foreground">字幕作为单独轨道嵌入，可开关</div>
-                  </button>
-                  
-                  <button
-                    onClick={() => setVideoOptions(prev => ({ ...prev, subtitleProcessing: 'hard' }))}
-                    className={cn(
-                      'w-full p-3 border rounded-lg text-left transition-colors',
-                      videoOptions.subtitleProcessing === 'hard'
-                        ? 'border-primary bg-primary/10'
-                        : 'hover:bg-muted/50'
-                    )}
-                  >
-                    <div className="font-semibold">硬烧录</div>
-                    <div className="text-xs text-muted-foreground">字幕直接烧录到视频画面上</div>
-                  </button>
+                  {renderSubtitleOption('none', '无字幕', '不处理字幕，仅导出视频', true)}
+                  {renderSubtitleOption(
+                    'soft',
+                    '软烧录',
+                    '字幕作为单独轨道嵌入，播放器可开关',
+                    softBurnAvailable,
+                    '仅桌面版（FFmpeg）支持软字幕轨道',
+                  )}
+                  {renderSubtitleOption(
+                    'hard',
+                    '硬烧录',
+                    env.isTauri
+                      ? 'FFmpeg + ASS 高质量烧录到画面'
+                      : 'WebAV 画面烧录（样式与预览一致）',
+                    hardBurnAvailable,
+                    env.isTauri ? '需要安装 FFmpeg' : undefined,
+                  )}
                 </div>
               </div>
 
-              {/* 警告信息 */}
               <div className="flex items-start space-x-2 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg text-sm">
                 <AlertCircle className="w-4 h-4 text-orange-600 dark:text-orange-400 mt-0.5 flex-shrink-0" />
                 <div>
-                  <div className="font-medium text-orange-900 dark:text-orange-100">注意事项</div>
+                  <div className="font-medium text-orange-900 dark:text-orange-100">引擎说明</div>
                   <div className="text-orange-700 dark:text-orange-300 mt-1">
-                    视频导出可能需要较长时间，导出过程中请勿关闭浏览器。
+                    {env.isTauri
+                      ? '桌面端优先使用安装包内置 FFmpeg；软/硬烧录均通过 ASS 生成。'
+                      : 'Web 端使用 WebAV 裁剪与画面烧录；软字幕轨道请使用桌面版。'}
                   </div>
                 </div>
               </div>
@@ -252,7 +392,11 @@ export function ExportDialog({
             </button>
             <button
               onClick={handleVideoExport}
-              className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+              disabled={!canExportVideo}
+              className={cn(
+                'px-4 py-2 text-sm bg-primary text-primary-foreground rounded-md transition-colors',
+                canExportVideo ? 'hover:bg-primary/90' : 'opacity-50 cursor-not-allowed',
+              )}
             >
               开始导出
             </button>

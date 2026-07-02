@@ -1,8 +1,10 @@
 /target
 /gen
 
-# FunASR sidecar binaries - not committed to git
+# Sidecar / bundled binaries - not committed to git (run pnpm fetch:ffmpeg / build:funasr-sidecar)
 /binaries/funasr-asr*
+/binaries/ffmpeg
+/binaries/ffmpeg.exe
 !/binaries/.gitkeep
 
 # FunASR models - large files, download separately

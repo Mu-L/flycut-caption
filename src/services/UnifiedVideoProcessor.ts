@@ -21,15 +21,17 @@ export class UnifiedVideoProcessor {
   async initialize(
     videoFile: VideoFile, 
     preferredEngine?: VideoEngineType,
-    fallbackEngines: VideoEngineType[] = ['webav', 'ffmpeg']
+    fallbackEngines?: VideoEngineType[]
   ): Promise<VideoEngineType> {
     try {
       // 清理之前的引擎
       await this.cleanup();
 
-      const engineOrder = preferredEngine 
-        ? [preferredEngine, ...fallbackEngines.filter(e => e !== preferredEngine)]
-        : fallbackEngines;
+      const defaults = VideoEngineFactory.getDefaultEngineOrder();
+      const fallbacks = fallbackEngines ?? defaults;
+      const engineOrder = preferredEngine
+        ? [preferredEngine, ...fallbacks.filter(e => e !== preferredEngine)]
+        : fallbacks;
 
       // 尝试获取最佳可用引擎
       const { engine, type } = await VideoEngineFactory.getBestAvailableEngine(engineOrder);
@@ -105,7 +107,7 @@ export class UnifiedVideoProcessor {
   /**
    * 配置当前引擎
    */
-  configureEngine(config: Record<string, any>): void {
+  configureEngine(config: Record<string, unknown>): void {
     if (this.currentEngine?.configure) {
       this.currentEngine.configure(config);
     }

@@ -31,8 +31,9 @@
     "active": true,
     "targets": "all",
     "resources": [
-      "models/sensevoice/*",
-      "binaries/*"
+      "../models.json",
+      "binaries/*",
+      "shared_assets/**/*"
     ]
   }
 }

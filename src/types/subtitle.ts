@@ -8,11 +8,20 @@ export interface SubtitleChunk {
   selected?: boolean; // 是否被选中删除
   deleted?: boolean; // 是否被删除
   isBlankSpacer?: boolean; // 是否为智能剪切插入的空白占位段
+  /** 字词级 chunk 归属的句子 id */
+  sentenceId?: string;
+  /** 句子级 chunk 包含的字词 id 列表（用于级联删除与字词展示） */
+  wordIds?: string[];
 }
 
 export interface SubtitleTranscript {
   text: string;
+  /** 句子级字幕（必选，用于列表/时间轴/导出） */
   chunks: SubtitleChunk[];
+  /** 字词级字幕（模型支持时提供，用于精细裁剪） */
+  wordChunks?: SubtitleChunk[];
+  /** 是否具备可用于裁剪的字词时间戳 */
+  hasWordTimestamps?: boolean;
   language: string;
   duration: number;
 }

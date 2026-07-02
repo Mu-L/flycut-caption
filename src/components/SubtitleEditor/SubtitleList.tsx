@@ -4,13 +4,14 @@ import { useCallback, useMemo, useState, type RefObject } from 'react';
 import { cn } from '@/lib/utils';
 import { useHistoryStore, useChunks, useHistoryText, useHistoryLanguage, useHistoryDuration, useCanUndo, useCanRedo, useUndo, useRedo } from '@/stores/historyStore';
 import { useAppStore } from '@/stores/appStore';
-import { isTimeInRange, calculateBlankSegments } from '@/utils/timeUtils';
-import { FileText, Trash2, RotateCcw, Undo, Redo, ArrowLeftRight, Languages, Loader2, Mic, AlertCircle, Wand2 } from 'lucide-react';
+import { isTimeInRange } from '@/utils/timeUtils';
+import { runSmartCutBlank } from '@/utils/smartCutBlank';
+import { FileText, Trash2, RotateCcw, Undo, Redo, Languages, Loader2, Mic, AlertCircle, Wand2, Scissors } from 'lucide-react';
+import { toast } from 'sonner';
 import { SubtitleItem } from './SubtitleItem';
 import type { EnhancedVideoPlayerRef } from '@/components/VideoPlayer/EnhancedVideoPlayer';
 import { useTranslation } from '@/contexts/LocaleProvider';
 import type { ASRProgress } from '@/types/subtitle';
-import { toast } from 'sonner';
 import {
   Select,
   SelectContent,
@@ -78,7 +79,6 @@ export function SubtitleList({
   const deleteSelected = useHistoryStore(state => state.deleteSelected);
   const restoreSelected = useHistoryStore(state => state.restoreSelected);
   const insertBlankChunks = useHistoryStore(state => state.insertBlankChunks);
-
   const smartCutSilenceThreshold = useAppStore(state => state.smartCutSilenceThreshold);
   const videoDuration = useAppStore(state => state.videoPlayerState.duration);
 
@@ -87,7 +87,7 @@ export function SubtitleList({
   const seekTo = useCallback((time: number) => {
     setCurrentTime(time);
     videoPlayerRef.current?.seekTo(time);
-  }, [setCurrentTime]);
+  }, [setCurrentTime, videoPlayerRef]);
 
   const currentChunk = useMemo(() => {
     let result = null;
@@ -116,7 +116,7 @@ export function SubtitleList({
       deletedCount,
       blankCount,
     };
-  }, [transcript.chunks, activeChunks]);
+  }, [transcript.chunks]);
 
   const handleToggleSelection = (chunkId: string) => {
     const newSelected = new Set(selectedIds);
@@ -144,6 +144,29 @@ export function SubtitleList({
     setSelectedIds(new Set());
   };
 
+  const handleSmartCutBlank = useCallback(() => {
+    runSmartCutBlank({
+      chunks: transcript.chunks,
+      threshold: smartCutSilenceThreshold,
+      totalDuration: videoDuration,
+      insertBlankChunks,
+      onEmpty: () => toast.info(t('components.workstation.smartCutEmpty')),
+      onDone: (result) => {
+        toast.success(
+          t('components.workstation.smartCutDone')
+            .replace('{count}', String(result.segments.length))
+            .replace('{seconds}', result.totalBlankSeconds.toFixed(1)),
+        );
+      },
+    });
+  }, [
+    transcript.chunks,
+    smartCutSilenceThreshold,
+    videoDuration,
+    insertBlankChunks,
+    t,
+  ]);
+
   const handleRestoreDeleted = () => {
     const deletedIds = new Set(
       transcript.chunks
@@ -153,20 +176,6 @@ export function SubtitleList({
     if (deletedIds.size > 0) {
       restoreSelected(deletedIds);
     }
-  };
-
-  const handleSmartCutBlank = () => {
-    const segments = calculateBlankSegments(transcript.chunks, smartCutSilenceThreshold, videoDuration);
-    if (segments.length === 0) {
-      toast.info(t('components.workstation.smartCutEmpty'));
-      return;
-    }
-    // 计算节省时长
-    const totalBlank = segments.reduce((acc, seg) => acc + (seg.end - seg.start), 0);
-    insertBlankChunks(segments);
-    toast.success(t('components.workstation.smartCutDone')
-      .replace('{count}', String(segments.length))
-      .replace('{seconds}', totalBlank.toFixed(1)));
   };
 
   // ASR 识别中：在字幕编辑器内展示加载状态
@@ -264,11 +273,6 @@ export function SubtitleList({
             {t('components.workstation.displaySecond')}
           </button>
         </div>
-
-        {/* CENTER: Swap button */}
-        <button className="p-1.5 text-aimu-text-muted hover:text-aimu-text-primary transition-colors rounded" title={t('components.workstation.swapTitle')}>
-          <ArrowLeftRight className="w-4 h-4" />
-        </button>
 
         {/* RIGHT: AI model + target language + correct + translate */}
         <div className="flex items-center gap-1.5">
@@ -397,6 +401,17 @@ export function SubtitleList({
             <Redo className="w-4 h-4" />
           </button>
           
+          <div className="w-px h-4 bg-aimu-border mx-1"></div>
+
+          <button
+            onClick={handleSmartCutBlank}
+            className="flex items-center gap-1 px-2 py-1 text-xs text-aimu-text-secondary hover:text-aimu-purple transition-colors"
+            title={t('components.workstation.smartCutBlankTitle')}
+          >
+            <Scissors className="w-3.5 h-3.5" />
+            <span>{t('components.workstation.smartCutBlank')}</span>
+          </button>
+
           <div className="w-px h-4 bg-aimu-border mx-1"></div>
           
           <button

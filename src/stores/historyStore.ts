@@ -2,6 +2,10 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import type { SubtitleChunk, SubtitleTranscript } from '@/types/subtitle'
+import { normalizeAsrTranscript } from '@/utils/asrTranscriptUtils'
+import { logAsrModelOutput } from '@/utils/asrOutputLog'
+
+type ChunkLayer = 'sentence' | 'word'
 
 interface Chunk extends SubtitleChunk {
   deleted?: boolean;
@@ -9,6 +13,7 @@ interface Chunk extends SubtitleChunk {
 
 interface UpdateAction {
   type: "update";
+  layer: ChunkLayer;
   id: string;
   prev: Partial<Chunk>;
   next: Partial<Chunk>;
@@ -16,7 +21,7 @@ interface UpdateAction {
 
 interface BatchUpdateAction {
   type: "batch";
-  updates: { id: string; prev: Partial<Chunk>; next: Partial<Chunk> }[];
+  updates: { layer: ChunkLayer; id: string; prev: Partial<Chunk>; next: Partial<Chunk> }[];
 }
 
 interface InsertChunksAction {
@@ -29,6 +34,8 @@ type HistoryAction = UpdateAction | BatchUpdateAction | InsertChunksAction;
 interface HistoryState {
   // 字幕数据
   chunks: Chunk[];
+  wordChunks: Chunk[];
+  hasWordTimestamps: boolean;
   language: string;
   
   // 历史记录
@@ -47,8 +54,9 @@ interface HistoryState {
 interface HistoryActions {
   // 基础操作
   setTranscript: (transcript: SubtitleTranscript) => void;
-  update: (id: string, next: Partial<Chunk>) => void;
-  delete: (id: string) => void; // 封装的删除操作
+  update: (id: string, next: Partial<Chunk>, layer?: ChunkLayer) => void;
+  delete: (id: string) => void; // 封装的删除操作（句子级，级联字词）
+  deleteWord: (id: string) => void; // 字词级删除/恢复
   
   // 历史操作
   undo: () => void;
@@ -89,8 +97,48 @@ const computeDerivedState = (chunks: Chunk[]) => {
 };
 
 // 初始状态
+const applyChunkUpdate = (
+  chunks: Chunk[],
+  wordChunks: Chunk[],
+  layer: ChunkLayer,
+  id: string,
+  patch: Partial<Chunk>,
+): { chunks: Chunk[]; wordChunks: Chunk[] } => {
+  if (layer === 'word') {
+    const index = wordChunks.findIndex((chunk) => chunk.id === id);
+    if (index === -1) return { chunks, wordChunks };
+    const nextWordChunks = [...wordChunks];
+    nextWordChunks[index] = { ...nextWordChunks[index], ...patch };
+    return { chunks, wordChunks: nextWordChunks };
+  }
+
+  const index = chunks.findIndex((chunk) => chunk.id === id);
+  if (index === -1) return { chunks, wordChunks };
+  const nextChunks = [...chunks];
+  nextChunks[index] = { ...nextChunks[index], ...patch };
+  return { chunks: nextChunks, wordChunks };
+};
+
+const syncSentenceFromWords = (chunks: Chunk[], wordChunks: Chunk[], sentenceId: string): Chunk[] => {
+  const sentence = chunks.find((chunk) => chunk.id === sentenceId);
+  if (!sentence?.wordIds?.length) return chunks;
+
+  const words = sentence.wordIds
+    .map((wordId) => wordChunks.find((word) => word.id === wordId))
+    .filter((word): word is Chunk => Boolean(word));
+  if (words.length === 0) return chunks;
+
+  const allDeleted = words.every((word) => word.deleted);
+
+  return chunks.map((chunk) =>
+    chunk.id === sentenceId ? { ...chunk, deleted: allDeleted } : chunk,
+  );
+};
+
 const initialState: HistoryState = {
   chunks: [],
+  wordChunks: [],
+  hasWordTimestamps: false,
   language: 'en',
   undoStack: [],
   redoStack: [],
@@ -110,18 +158,32 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
 
       // 设置字幕转录内容
       setTranscript: (transcript) => {
-        // 转换SubtitleChunk为Chunk，添加deleted属性
-        const chunks = transcript.chunks.map(chunk => ({
+        logAsrModelOutput(transcript, {
+          source: 'setTranscript',
+          stage: '模型原始输出',
+        });
+
+        const normalized = normalizeAsrTranscript(transcript);
+
+        logAsrModelOutput(normalized, {
+          source: 'setTranscript',
+          stage: '规范化后',
+        });
+        const chunks = normalized.chunks.map((chunk) => ({
           ...chunk,
-          deleted: false,
+          deleted: chunk.deleted ?? false,
         }));
-        
-        // 重新计算衍生状态
+        const wordChunks = (normalized.wordChunks ?? []).map((chunk) => ({
+          ...chunk,
+          deleted: chunk.deleted ?? false,
+        }));
         const derived = computeDerivedState(chunks);
-        
+
         set({
           chunks,
-          language: transcript.language,
+          wordChunks,
+          hasWordTimestamps: normalized.hasWordTimestamps ?? false,
+          language: normalized.language,
           text: derived.text,
           duration: derived.duration,
           undoStack: [],
@@ -131,15 +193,13 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
         });
       },
 
-      // 更新chunk属性
-      update: (id, next) => {
+      // 更新 chunk 属性（句子或字词层）
+      update: (id, next, layer = 'sentence') => {
         const state = get();
-        const chunkIndex = state.chunks.findIndex(c => c.id === id);
-        if (chunkIndex === -1) return;
+        const sourceChunks = layer === 'word' ? state.wordChunks : state.chunks;
+        const chunk = sourceChunks.find((item) => item.id === id);
+        if (!chunk) return;
 
-        const chunk = state.chunks[chunkIndex];
-        
-        // 生成prev状态记录
         const prev: Partial<Chunk> = {};
         for (const key in next) {
           const k = key as keyof Chunk;
@@ -148,40 +208,40 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
 
         const now = Date.now();
         const lastAction = state.undoStack[state.undoStack.length - 1];
-        
-        // 更新chunk
-        const updatedChunk = { ...chunk, ...next };
-        const newChunks = [...state.chunks];
-        newChunks[chunkIndex] = updatedChunk;
+        const applied = applyChunkUpdate(state.chunks, state.wordChunks, layer, id, next);
+        let newChunks = applied.chunks;
+        const newWordChunks = applied.wordChunks;
+
+        if (layer === 'word' && chunk.sentenceId) {
+          newChunks = syncSentenceFromWords(newChunks, newWordChunks, chunk.sentenceId);
+        }
 
         let newUndoStack: HistoryAction[];
-        const newRedoStack: UpdateAction[] = [];
+        const newRedoStack: HistoryAction[] = [];
         const newLastUpdateTime = now;
 
-        // 检查是否可以合并操作（连续快速操作同一个chunk）
         if (
           lastAction &&
-          lastAction.type === "update" &&
+          lastAction.type === 'update' &&
+          lastAction.layer === layer &&
           lastAction.id === id &&
           now - state.lastUpdateTime < state.mergeThreshold
         ) {
-          // 合并到上一个操作
           const mergedAction = {
             ...lastAction,
-            next: { ...lastAction.next, ...next }
+            next: { ...lastAction.next, ...next },
           };
           newUndoStack = [...state.undoStack.slice(0, -1), mergedAction];
         } else {
-          // 创建新的历史记录
-          const action: UpdateAction = { type: "update", id, prev, next };
+          const action: UpdateAction = { type: 'update', layer, id, prev, next };
           newUndoStack = [...state.undoStack, action];
         }
 
-        // 重新计算衍生状态
         const derived = computeDerivedState(newChunks);
-        
+
         set({
           chunks: newChunks,
+          wordChunks: newWordChunks,
           undoStack: newUndoStack,
           redoStack: newRedoStack,
           lastUpdateTime: newLastUpdateTime,
@@ -192,14 +252,70 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
         });
       },
 
-      // 删除chunk（封装的便捷方法）
+      // 删除句子（有字词时级联到 wordChunks）
       delete: (id) => {
         const state = get();
-        const chunk = state.chunks.find(c => c.id === id);
+        const chunk = state.chunks.find((item) => item.id === id);
         if (!chunk) return;
-        
-        // 使用update方法来确保历史记录正确
-        get().update(id, { deleted: !chunk.deleted });
+
+        const nextDeleted = !chunk.deleted;
+        if (state.hasWordTimestamps && chunk.wordIds?.length) {
+          const updates: BatchUpdateAction['updates'] = [
+            {
+              layer: 'sentence',
+              id,
+              prev: { deleted: chunk.deleted },
+              next: { deleted: nextDeleted },
+            },
+          ];
+
+          for (const wordId of chunk.wordIds) {
+            const word = state.wordChunks.find((item) => item.id === wordId);
+            if (!word) continue;
+            updates.push({
+              layer: 'word',
+              id: wordId,
+              prev: { deleted: word.deleted },
+              next: { deleted: nextDeleted },
+            });
+          }
+
+          let newChunks = [...state.chunks];
+          let newWordChunks = [...state.wordChunks];
+          for (const item of updates) {
+            const applied = applyChunkUpdate(
+              newChunks,
+              newWordChunks,
+              item.layer,
+              item.id,
+              item.next,
+            );
+            newChunks = applied.chunks;
+            newWordChunks = applied.wordChunks;
+          }
+
+          const derived = computeDerivedState(newChunks);
+          set({
+            chunks: newChunks,
+            wordChunks: newWordChunks,
+            undoStack: [...state.undoStack, { type: 'batch', updates }],
+            redoStack: [],
+            text: derived.text,
+            duration: derived.duration,
+            canUndo: true,
+            canRedo: false,
+          });
+          return;
+        }
+
+        get().update(id, { deleted: nextDeleted }, 'sentence');
+      },
+
+      deleteWord: (id) => {
+        const state = get();
+        const word = state.wordChunks.find((item) => item.id === id);
+        if (!word) return;
+        get().update(id, { deleted: !word.deleted }, 'word');
       },
 
       // 撤销操作
@@ -208,21 +324,36 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
         if (state.undoStack.length === 0) return;
 
         const action = state.undoStack[state.undoStack.length - 1];
-        const newChunks = [...state.chunks];
+        let newChunks = [...state.chunks];
+        let newWordChunks = [...state.wordChunks];
 
         if (action.type === "update") {
-          const chunkIndex = newChunks.findIndex(c => c.id === action.id);
-          if (chunkIndex !== -1) {
-            const chunk = newChunks[chunkIndex];
-            newChunks[chunkIndex] = { ...chunk, ...action.prev };
+          const applied = applyChunkUpdate(
+            newChunks,
+            newWordChunks,
+            action.layer,
+            action.id,
+            action.prev,
+          );
+          newChunks = applied.chunks;
+          newWordChunks = applied.wordChunks;
+          if (action.layer === 'word') {
+            const word = newWordChunks.find((item) => item.id === action.id);
+            if (word?.sentenceId) {
+              newChunks = syncSentenceFromWords(newChunks, newWordChunks, word.sentenceId);
+            }
           }
         } else if (action.type === "batch") {
           for (const u of action.updates) {
-            const chunkIndex = newChunks.findIndex(c => c.id === u.id);
-            if (chunkIndex !== -1) {
-              const chunk = newChunks[chunkIndex];
-              newChunks[chunkIndex] = { ...chunk, ...u.prev };
-            }
+            const applied = applyChunkUpdate(
+              newChunks,
+              newWordChunks,
+              u.layer,
+              u.id,
+              u.prev,
+            );
+            newChunks = applied.chunks;
+            newWordChunks = applied.wordChunks;
           }
         } else {
           // insert: 撤销时移除被插入的占位 chunk
@@ -243,6 +374,7 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
 
         set({
           chunks: newChunks,
+          wordChunks: newWordChunks,
           undoStack: newUndoStack,
           redoStack: newRedoStack,
           text: derived.text,
@@ -258,21 +390,36 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
         if (state.redoStack.length === 0) return;
 
         const action = state.redoStack[state.redoStack.length - 1];
-        const newChunks = [...state.chunks];
+        let newChunks = [...state.chunks];
+        let newWordChunks = [...state.wordChunks];
 
         if (action.type === "update") {
-          const chunkIndex = newChunks.findIndex(c => c.id === action.id);
-          if (chunkIndex !== -1) {
-            const chunk = newChunks[chunkIndex];
-            newChunks[chunkIndex] = { ...chunk, ...action.next };
+          const applied = applyChunkUpdate(
+            newChunks,
+            newWordChunks,
+            action.layer,
+            action.id,
+            action.next,
+          );
+          newChunks = applied.chunks;
+          newWordChunks = applied.wordChunks;
+          if (action.layer === 'word') {
+            const word = newWordChunks.find((item) => item.id === action.id);
+            if (word?.sentenceId) {
+              newChunks = syncSentenceFromWords(newChunks, newWordChunks, word.sentenceId);
+            }
           }
         } else if (action.type === "batch") {
           for (const u of action.updates) {
-            const chunkIndex = newChunks.findIndex(c => c.id === u.id);
-            if (chunkIndex !== -1) {
-              const chunk = newChunks[chunkIndex];
-              newChunks[chunkIndex] = { ...chunk, ...u.next };
-            }
+            const applied = applyChunkUpdate(
+              newChunks,
+              newWordChunks,
+              u.layer,
+              u.id,
+              u.next,
+            );
+            newChunks = applied.chunks;
+            newWordChunks = applied.wordChunks;
           }
         } else {
           // insert: 重做时重新插入占位 chunk，按时间顺序合并
@@ -293,6 +440,7 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
 
         set({
           chunks: newChunks,
+          wordChunks: newWordChunks,
           undoStack: newUndoStack,
           redoStack: newRedoStack,
           text: derived.text,
@@ -327,6 +475,7 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
             if (!chunk.deleted) {
               const action: UpdateAction = {
                 type: "update",
+                layer: 'sentence',
                 id,
                 prev: { deleted: chunk.deleted },
                 next: { deleted: true }
@@ -370,6 +519,7 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
             if (chunk.deleted) {
               const action: UpdateAction = {
                 type: "update",
+                layer: 'sentence',
                 id,
                 prev: { deleted: chunk.deleted },
                 next: { deleted: false }
@@ -420,6 +570,7 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
 
         const action: UpdateAction = {
           type: "update",
+          layer: 'sentence',
           id: chunkId,
           prev: { text: chunk.text },
           next: { text: trimmedText }
@@ -449,7 +600,7 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
         if (updates.length === 0) return;
         const newChunks = [...state.chunks];
         const now = Date.now();
-        const batchUpdates: { id: string; prev: Partial<Chunk>; next: Partial<Chunk> }[] = [];
+        const batchUpdates: BatchUpdateAction['updates'] = [];
 
         for (const u of updates) {
           const chunkIndex = newChunks.findIndex(c => c.id === u.id);
@@ -466,7 +617,7 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
             prev.secondText = chunk.secondText;
           }
           if (Object.keys(next).length === 0) continue;
-          batchUpdates.push({ id: u.id, prev, next });
+          batchUpdates.push({ layer: 'sentence', id: u.id, prev, next });
           newChunks[chunkIndex] = { ...chunk, ...next };
         }
 
@@ -558,6 +709,9 @@ export const useResetHistory = () => useHistoryStore(state => state.reset);
 
 // 获取所有chunks（在组件中使用 useMemo 过滤）
 export const useChunks = () => useHistoryStore(state => state.chunks);
+export const useWordChunks = () => useHistoryStore(state => state.wordChunks);
+export const useHasWordTimestamps = () => useHistoryStore(state => state.hasWordTimestamps);
+export const useDeleteWord = () => useHistoryStore(state => state.deleteWord);
 
 // 独立的选择器，避免创建新对象引用
 export const useHistoryText = () => useHistoryStore(state => state.text);

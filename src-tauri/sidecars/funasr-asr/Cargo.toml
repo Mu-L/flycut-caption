@@ -5,3 +5,9 @@ edition = "2021"
 
 [dependencies]
 sherpa-onnx = "1.13.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+ndarray = "0.17"
+tract-onnx = "0.23.3"
+kaldi-native-fbank = "0.1.0"

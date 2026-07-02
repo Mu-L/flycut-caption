@@ -1,2 +1,2 @@
-export { SubtitleSettings, defaultSubtitleStyle } from './SubtitleSettings';
-export type { SubtitleStyle } from './SubtitleSettings';
+export { SubtitleSettings } from './SubtitleSettings';
+export { defaultSubtitleStyle, type SubtitleStyle } from '@/subtitle';

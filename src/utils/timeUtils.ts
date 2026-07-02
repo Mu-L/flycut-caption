@@ -1,5 +1,17 @@
 // 时间处理工具函数
 
+import {
+  endsSentence,
+  resolveSentenceGroupingOptions,
+  type SentenceGroupingOptions,
+} from '../config/sentenceGrouping.ts';
+
+export type { SentenceGroupingOptions };
+export {
+  DEFAULT_SENTENCE_GROUPING_OPTIONS,
+  resolveSentenceGroupingOptions,
+} from '../config/sentenceGrouping.ts';
+
 /**
  * 计算字幕片段之间的空白段（时间戳间隙）。
  * 仅基于活跃（未删除）chunk 的时间戳，识别首段前、段间、末段后超过阈值的空白。
@@ -148,22 +160,33 @@ export function mergeTimeRanges(ranges: [number, number][]): [number, number][] 
   return merged;
 }
 
+function isDigitOnly(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.length > 0 && /^\d+$/.test(trimmed);
+}
+
+function mergeAdjacentDigitTokens<T extends { text: string; timestamp: [number, number] }>(
+  chunks: T[],
+): T[] {
+  const merged: T[] = [];
+  for (const chunk of chunks) {
+    const last = merged[merged.length - 1];
+    if (last && isDigitOnly(last.text) && isDigitOnly(chunk.text)) {
+      last.text += chunk.text;
+      last.timestamp = [last.timestamp[0], chunk.timestamp[1]];
+      continue;
+    }
+    merged.push({ ...chunk });
+  }
+  return merged;
+}
+
 /**
  * 将字级时间戳智能分组为句子
  */
 export function groupWordsIntoSentences(
   chunks: Array<{ text: string; timestamp: [number, number]; id: string; selected?: boolean }>,
-  options: {
-    maxDuration: number; // 最大句子时长（秒）
-    maxWords: number;    // 最大单词数
-    sentenceEnders: string[]; // 句子结束符号
-    pauseThreshold: number; // 停顿阈值（秒）
-  } = {
-    maxDuration: 10,
-    maxWords: 20,
-    sentenceEnders: ['.', '!', '?', '。', '！', '？', '…'],
-    pauseThreshold: 1.0
-  }
+  options?: Partial<SentenceGroupingOptions>,
 ): Array<{
   id: string;
   text: string;
@@ -174,6 +197,11 @@ export function groupWordsIntoSentences(
   wordCount: number;
 }> {
   if (!chunks.length) return [];
+
+  const config = resolveSentenceGroupingOptions(options);
+  const normalizedChunks = config.mergeAdjacentDigitTokens
+    ? mergeAdjacentDigitTokens(chunks)
+    : chunks;
 
   const sentences: Array<{
     id: string;
@@ -188,12 +216,12 @@ export function groupWordsIntoSentences(
   let currentSentence: typeof chunks = [];
   let sentenceIndex = 0;
 
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
+  for (let i = 0; i < normalizedChunks.length; i++) {
+    const chunk = normalizedChunks[i];
     currentSentence.push(chunk);
 
-    const isLastChunk = i === chunks.length - 1;
-    const nextChunk = i < chunks.length - 1 ? chunks[i + 1] : null;
+    const isLastChunk = i === normalizedChunks.length - 1;
+    const nextChunk = i < normalizedChunks.length - 1 ? normalizedChunks[i + 1] : null;
     
     // 计算当前句子时长
     const currentDuration = currentSentence.length > 0 
@@ -206,12 +234,11 @@ export function groupWordsIntoSentences(
       : 0;
     
     // 决定是否结束当前句子
-    const shouldEndSentence = 
-      isLastChunk || // 最后一个词
-      currentSentence.length >= options.maxWords || // 达到最大单词数
-      currentDuration >= options.maxDuration || // 达到最大时长
-      pauseToNext >= options.pauseThreshold || // 停顿时间过长
-      options.sentenceEnders.some(ender => chunk.text.trim().endsWith(ender)); // 遇到句子结束符
+    const shouldEndSentence =
+      isLastChunk ||
+      currentDuration >= config.maxDurationSec ||
+      pauseToNext >= config.pauseThresholdSec ||
+      endsSentence(chunk.text, config.sentenceEnders);
 
     if (shouldEndSentence && currentSentence.length > 0) {
       const sentenceText = currentSentence.map(c => c.text).join('').trim();

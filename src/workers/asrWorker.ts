@@ -1,10 +1,11 @@
-// ASR Worker - 基于 Whisper 的语音识别处理
+// ASR Worker - 浏览器端 ASR 处理（Whisper / Moonshine via Transformers.js）
 // 生成句子级别时间戳，适合字幕编辑
 
 import { env, pipeline } from '@huggingface/transformers';
 import type { ASRProgress, SubtitleTranscript } from '../types/subtitle';
 import { isValidLanguageCode } from '../constants/languages';
 import type { TransformersASREngineConfig } from '../services/asrEngines/TransformersASREngine';
+import { logAsrModelOutput } from '../utils/asrOutputLog';
 
 // 本 worker 通过 `?worker&inline` 内联为 blob URL 运行。
 // onnxruntime-web 的 WebGPU 后端会用相对路径动态 import 胶水模块
@@ -49,19 +50,35 @@ globalThis.fetch = async function(input: RequestInfo | URL, init?: RequestInit):
   return originalFetch(input, init);
 };
 
-const PER_DEVICE_CONFIG = {
-  webgpu: {
-    dtype: {
+// 按 family 构造 transformers.js 的 pipeline 选项
+// Whisper 系列包含 encoder_model + decoder_model_merged，可分别指定 dtype；
+// Moonshine 包含 preprocessor/encoder/uncached_decoder/cached_decoder，
+// 默认权重本身就是 int8 量化版本，直接用 'q8' 在 WASM 下最稳，
+// WebGPU 暂时不显式指定 dtype，由 transformers.js 自行决策。
+function buildPipelineOptions(config: TransformersASREngineConfig, progress_callback?: (progress: unknown) => void) {
+  const base: Record<string, unknown> = { progress_callback };
+
+  if (config.family === 'moonshine') {
+    if (config.device === 'wasm') {
+      base.dtype = 'q8';
+    }
+    // webgpu：不指定 dtype，交给 transformers.js 默认处理
+    base.device = config.device;
+    return base;
+  }
+
+  // 默认 whisper
+  if (config.device === 'webgpu') {
+    base.dtype = {
       encoder_model: 'fp32',
       decoder_model_merged: 'q4',
-    },
-    device: 'webgpu',
-  },
-  wasm: {
-    dtype: 'q8',
-    device: 'wasm',
-  },
-} as const;
+    };
+  } else {
+    base.dtype = 'q8';
+  }
+  base.device = config.device;
+  return base;
+}
 
 /**
  * ASR 管道单例模式 - 句子级别时间戳版本
@@ -74,6 +91,7 @@ class PipelineSingleton {
     const cacheKey = JSON.stringify({
       modelId: config.modelId,
       modelBaseUrl: config.modelBaseUrl,
+      family: config.family,
       device: config.device,
     });
 
@@ -84,12 +102,10 @@ class PipelineSingleton {
 
     if (!this.instance) {
       activeConfig = config;
-      console.log('ASR创建新的管道实例:', { device: config.device, modelId: config.modelId, modelBaseUrl: config.modelBaseUrl });
+      console.log('ASR创建新的管道实例:', { family: config.family, device: config.device, modelId: config.modelId, modelBaseUrl: config.modelBaseUrl });
 
-      this.instance = pipeline('automatic-speech-recognition', config.modelId, {
-        ...PER_DEVICE_CONFIG[config.device],
-        progress_callback,
-      });
+      const options = buildPipelineOptions(config, progress_callback);
+      this.instance = pipeline('automatic-speech-recognition', config.modelId, options);
     }
     return this.instance;
   }
@@ -104,7 +120,7 @@ async function load({ config }: { config: TransformersASREngineConfig }) {
   
   self.postMessage({
     status: 'loading',
-    data: `正在加载模型 (${config.device})...`,
+    data: `正在加载模型 (${config.family} / ${config.device})...`,
   } satisfies ASRProgress);
 
   try {
@@ -115,16 +131,18 @@ async function load({ config }: { config: TransformersASREngineConfig }) {
       self.postMessage(progress);
     });
 
-    // WebGPU 需要预热
+    // WebGPU 需要预热（仅 whisper 系列传入 language 选项）
     if (config.device === 'webgpu') {
       self.postMessage({
         status: 'loading',
         data: '正在编译着色器并预热模型...',
       } satisfies ASRProgress);
 
-      await transcriber(new Float32Array(16_000), {
-        language: config.language,
-      });
+      const warmupOpts: Record<string, unknown> = {};
+      if (config.family === 'whisper') {
+        warmupOpts.language = config.language;
+      }
+      await transcriber(new Float32Array(16_000), warmupOpts);
     }
 
     console.log('ASR模型加载完成');
@@ -155,24 +173,35 @@ async function run({ audio, language }: { audio: Float32Array; language: string 
 
     self.postMessage({
       status: 'running',
-      data: '正在进行语音识别...',
+      data: `正在进行语音识别 (${activeConfig.family})...`,
     } satisfies ASRProgress);
 
-    // 确保语言代码正确，如果传入不支持的语言，使用英语作为默认值
-    const validLanguage = isValidLanguageCode(language) ? language : 'en';
-    console.log('ASR使用语言:', { original: language, valid: validLanguage });
-    
-    const result = await transcriber(audio, {
-      language: validLanguage,
-      return_timestamps: true,  // 生成句子级别时间戳
-      chunk_length_s: 30,
-    });
+    // 确保语言代码正确；Moonshine 仅支持英文，强制 'en'
+    let validLanguage = isValidLanguageCode(language) ? language : 'en';
+    if (activeConfig.family === 'moonshine') {
+      validLanguage = 'en';
+    }
+    console.log('ASR使用语言:', { original: language, valid: validLanguage, family: activeConfig.family });
+
+    // 按模型族构造识别选项：
+    // - Whisper 支持 language / chunk_length_s / return_timestamps（chunk_length_s=30，避免 Web 端短窗强切）
+    // - Moonshine 支持 return_timestamps，不传 language 与 chunk_length_s（按整段处理）
+    const opts: Record<string, unknown> = { return_timestamps: true };
+    if (activeConfig.family === 'whisper') {
+      opts.language = validLanguage;
+      opts.chunk_length_s = 30;
+    }
+
+    const result = await transcriber(audio, opts);
 
     const end = performance.now();
-    console.log('ASR识别原始结果:', result);
+    logAsrModelOutput(result as Record<string, unknown>, {
+      source: 'transformers-worker',
+      stage: 'pipeline 原始输出',
+    });
 
     // 处理结果，生成句子级别的字幕片段
-    let chunks = [];
+    let chunks: Array<{ text: string; timestamp: [number, number]; id: string; selected: boolean }> = [];
     let duration = 0;
     
     if (result.chunks && Array.isArray(result.chunks)) {
@@ -197,16 +226,15 @@ async function run({ audio, language }: { audio: Float32Array; language: string 
     const transcript: SubtitleTranscript = {
       text: result.text,
       chunks,
-      language,
+      language: activeConfig.family === 'moonshine' ? 'en' : validLanguage,
       duration,
     };
 
-    console.log('ASR识别完成:', { 
-      transcriptLength: transcript.chunks.length, 
-      duration: transcript.duration, 
-      time: end - start 
+    logAsrModelOutput(transcript, {
+      source: 'transformers-worker',
+      stage: '转写结果',
     });
-    
+
     self.postMessage({ 
       status: 'complete', 
       result: transcript, 
@@ -237,7 +265,7 @@ self.addEventListener('message', async (e) => {
       break;
 
     default:
-      console.error('未知的ASR Worker消息类型:', type);
+      console.error('未知的ASR Worker消息类型:', e.data);
       self.postMessage({
         status: 'error',
         error: `未知的消息类型: ${type}`,

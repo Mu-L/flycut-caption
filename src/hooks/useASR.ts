@@ -9,6 +9,7 @@ import { asrService } from '@/services/asrService';
 import type { ASRProgress } from '@/types/subtitle';
 import type { VideoFile } from '@/types/video';
 import { readFileAsArrayBuffer } from '@/utils/fileUtils';
+import { getRuntimeAsrEngineType, isTauriRuntime } from '@/utils/runtime';
 
 // 处于"进行中"的状态集合
 const LOADING_STATUSES: ASRProgress['status'][] = [
@@ -30,6 +31,7 @@ export interface UseASRReturn {
 export function useASR(): UseASRReturn {
   const language = useAppStore((s) => s.language);
   const asrModelId = useAppStore((s) => s.asrModelId);
+  const webModelId = useAppStore((s) => s.webModelId);
   const deviceType = useAppStore((s) => s.deviceType);
   const asrEngineType = useAppStore((s) => s.asrEngineType);
   const asrProgress = useAppStore((s) => s.asrProgress);
@@ -40,10 +42,11 @@ export function useASR(): UseASRReturn {
   const setLoading = useAppStore((s) => s.setLoading);
   const setStage = useAppStore((s) => s.setStage);
   const setTranscript = useHistoryStore((s) => s.setTranscript);
+  const setASREngineType = useAppStore((s) => s.setASREngineType);
 
   // 保持最新的 language/modelId 引用，避免回调闭包过期
-  const latestRef = useRef({ language, asrModelId });
-  latestRef.current = { language, asrModelId };
+  const latestRef = useRef({ language, asrModelId, webModelId });
+  latestRef.current = { language, asrModelId, webModelId };
 
   // 设置进度回调（不弹出消息，仅更新状态）
   useEffect(() => {
@@ -72,9 +75,14 @@ export function useASR(): UseASRReturn {
     asrService.setDevice(deviceType);
   }, [deviceType]);
 
+  // 按运行环境锁定引擎：浏览器 = Transformers，Tauri = FunASR
   useEffect(() => {
-    asrService.setEngineType(asrEngineType);
-  }, [asrEngineType]);
+    const expected = getRuntimeAsrEngineType();
+    asrService.setEngineType(expected);
+    if (asrEngineType !== expected) {
+      setASREngineType(expected);
+    }
+  }, [asrEngineType, setASREngineType]);
 
   const startASR = useCallback(
     async (videoFile: VideoFile) => {
@@ -84,12 +92,12 @@ export function useASR(): UseASRReturn {
         // FunASR Tauri 引擎需要本地文件路径而非 ArrayBuffer
         // 优先使用 VideoFile.path（Tauri 原生文件选择器提供），
         // 回退到 File.path（Tauri v1 或开启了 path 暴露的 v2）
-        const isTauri = '__TAURI_INTERNALS__' in window;
+        const isTauri = isTauriRuntime();
         const filePath =
           videoFile.path ||
           (isTauri ? (videoFile.file as File & { path?: string }).path : undefined);
 
-        if (asrEngineType === 'funasr-tauri') {
+        if (isTauri) {
           if (!filePath) {
             throw new Error('Tauri 引擎需要本地文件路径，请通过文件选择器选择本地文件');
           }
@@ -108,18 +116,17 @@ export function useASR(): UseASRReturn {
         setASRProgress({ status: 'loading', data: '正在准备音频数据...' });
         const audioBuffer = await readFileAsArrayBuffer(videoFile.file);
 
-        // 确保模型已准备
-        if (!asrService.isReady()) {
+        // 确保指定 Web 模型已准备（传 Web 短 id，引擎层负责切换/加载）
+        if (!asrService.isReady() || !asrService.isWebModelReady(latestRef.current.webModelId)) {
           setASRProgress({ status: 'loading', data: '准备模型中...' });
-          await asrService.prepareModel();
+          await asrService.prepareModel(latestRef.current.webModelId);
         }
 
-        // 进行转录
+        // 进行转录（transformers 引擎忽略 modelId 参数，使用 prepareModel 时已设置的模型）
         setASRProgress({ status: 'loading', data: '开始转录音频...' });
         await asrService.transcribeAudio(
           audioBuffer,
           latestRef.current.language,
-          latestRef.current.asrModelId,
         );
         // 注意：不在此处设置 transcript，统一交由 progress callback 处理
       } catch (error) {
@@ -131,7 +138,7 @@ export function useASR(): UseASRReturn {
         setLoading(false);
       }
     },
-    [setLoading, setError, setASRProgress, asrEngineType],
+    [setLoading, setError, setASRProgress],
   );
 
   const isASRLoading = useMemo(

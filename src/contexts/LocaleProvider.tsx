@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import type { FlyCutCaptionLocale } from '@/locales';
 import { defaultLocale } from '@/locales';

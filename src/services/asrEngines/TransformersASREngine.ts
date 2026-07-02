@@ -1,18 +1,30 @@
 import type { ASRProgress, SubtitleTranscript } from '@/types/subtitle';
 import asrWorker from '@/workers/asrWorker.ts?worker&inline';
+import {
+  DEFAULT_WEB_MODEL_ID,
+  getWebAsrModel,
+} from '@/config/webAsrModels';
 
 export type ASRDevice = 'webgpu' | 'wasm';
 
 export interface TransformersASREngineConfig {
+  /** HuggingFace / OSS 仓库 id，例如 onnx-community/whisper-small */
   modelId: string;
+  /** 自建 OSS 镜像前缀；未设置时直接从 HuggingFace 下载 */
   modelBaseUrl?: string;
+  /** 模型族，决定 worker 内的 dtype / 时间戳策略 */
+  family: 'whisper' | 'moonshine';
   device: ASRDevice;
   language: string;
 }
 
+// 默认配置：使用推荐的 Web 模型（whisper-small）
+const DEFAULT_WEB_MODEL = getWebAsrModel(DEFAULT_WEB_MODEL_ID)!;
+
 export const DEFAULT_TRANSFORMERS_ASR_CONFIG: TransformersASREngineConfig = {
-  modelId: 'onnx-community/whisper-small',
-  modelBaseUrl: 'https://fly-cut.oss-cn-hangzhou.aliyuncs.com/models/onnx-community/whisper-small',
+  modelId: DEFAULT_WEB_MODEL.modelId,
+  modelBaseUrl: DEFAULT_WEB_MODEL.modelBaseUrl,
+  family: DEFAULT_WEB_MODEL.family,
   device: 'wasm',
   language: 'en',
 };
@@ -32,6 +44,7 @@ export class TransformersASREngine {
     const needsReload =
       nextConfig.modelId !== this.config.modelId ||
       nextConfig.modelBaseUrl !== this.config.modelBaseUrl ||
+      nextConfig.family !== this.config.family ||
       nextConfig.device !== this.config.device;
 
     this.config = nextConfig;
@@ -40,6 +53,22 @@ export class TransformersASREngine {
       this.isModelLoaded = false;
       this.destroyWorker();
     }
+  }
+
+  /**
+   * 按 Web 短 id 设置模型（例如 'whisper-small' / 'moonshine-tiny'）。
+   * 将查阅 webAsrModels 清单，转换为 HF modelId / modelBaseUrl / family。
+   */
+  public setWebModel(webModelId: string) {
+    const meta = getWebAsrModel(webModelId);
+    if (!meta) {
+      throw new Error(`未知的 Web ASR 模型: ${webModelId}`);
+    }
+    this.setConfig({
+      modelId: meta.modelId,
+      modelBaseUrl: meta.modelBaseUrl,
+      family: meta.family,
+    });
   }
 
   public getConfig(): TransformersASREngineConfig {

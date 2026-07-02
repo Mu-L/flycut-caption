@@ -1,4 +1,6 @@
 import type { CSSProperties } from 'react'
+import type { FlyCutCaptionLocale } from './locales'
+import type { SubtitleChunk } from './types/subtitle'
 
 // Define all types locally to avoid rollup issues
 export interface VideoFile {
@@ -10,12 +12,7 @@ export interface VideoFile {
   name: string
 }
 
-export interface SubtitleChunk {
-  id: string
-  text: string
-  timestamp: [number, number]
-  deleted?: boolean
-}
+export type { SubtitleChunk } from './types/subtitle'
 
 export interface VideoSegment {
   start: number
@@ -38,24 +35,7 @@ export interface ASRProgress {
   message?: string
 }
 
-export interface SubtitleStyle {
-  fontFamily: string
-  fontSize: number
-  fontWeight: 'normal' | 'bold'
-  color: string
-  backgroundColor: string
-  borderColor: string
-  borderWidth: number
-  borderRadius: number
-  padding: number
-  position: 'top' | 'center' | 'bottom'
-  alignment: 'left' | 'center' | 'right'
-  opacity: number
-  shadowColor: string
-  shadowBlur: number
-  shadowOffsetX: number
-  shadowOffsetY: number
-}
+export type { SubtitleStyle } from './subtitle/subtitleStyle'
 
 // FlyCut Caption specific configuration
 export interface FlyCutCaptionConfig {
@@ -90,7 +70,7 @@ export interface FlyCutCaptionProps {
   /** Component configuration */
   config?: FlyCutCaptionConfig
   /** Custom locale data */
-  locale?: any  // FlyCutCaptionLocale type will be imported later
+  locale?: FlyCutCaptionLocale
   /** Called when component is ready */
   onReady?: () => void
   /** Called when a file is selected */

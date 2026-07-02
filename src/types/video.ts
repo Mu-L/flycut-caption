@@ -25,6 +25,7 @@ export interface VideoSegment {
   end: number;
   keep: boolean; // true = 保留, false = 删除
   text?: string; // 字幕文本内容
+  secondText?: string; // 副字幕文本
   id?: string; // 字幕片段ID
 }
 

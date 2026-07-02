@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { ASRProgress, SubtitleTranscript } from '@/types/subtitle';
+import { logAsrModelOutput } from '@/utils/asrOutputLog';
 
 interface FunASREnvironmentStatus {
   modelReady: boolean;
@@ -59,6 +60,11 @@ export class FunASRTauriEngine {
       inputPath: input.path,
       language,
       modelId,
+    });
+
+    logAsrModelOutput(result, {
+      source: 'funasr-tauri',
+      stage: 'sidecar 返回',
     });
 
     this.onProgress?.({ status: 'complete', result });

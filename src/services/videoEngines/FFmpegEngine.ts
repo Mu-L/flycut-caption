@@ -8,10 +8,28 @@ import type {
 } from '@/types/videoEngine';
 import type { VideoFile, VideoSegment, VideoProcessingProgress } from '@/types/video';
 
-// FFmpeg.wasm 类型定义（简化版）
+interface FFmpegDirEntry {
+  name: string;
+}
+
+interface FFmpegWasmInstance {
+  on(event: 'progress', handler: (data: { progress: number }) => void): void;
+  on(event: 'log', handler: (data: { message: string }) => void): void;
+  load(): Promise<void>;
+  writeFile(name: string, data: Uint8Array): Promise<void>;
+  readFile(name: string): Promise<Uint8Array>;
+  exec(args: string[]): Promise<void>;
+  listDir(path: string): Promise<FFmpegDirEntry[]>;
+  deleteFile(name: string): Promise<void>;
+}
+
+interface FFmpegWasmModule {
+  FFmpeg: new () => FFmpegWasmInstance;
+}
+
 declare global {
   interface Window {
-    FFmpeg?: any;
+    FFmpeg?: FFmpegWasmModule;
   }
 }
 
@@ -20,7 +38,7 @@ export class FFmpegEngine implements IVideoProcessingEngine {
   readonly type: VideoEngineType = 'ffmpeg';
   readonly version = '0.12.0';
 
-  private ffmpeg: any = null;
+  private ffmpeg: FFmpegWasmInstance | null = null;
   private onProgress?: (progress: VideoProcessingProgress) => void;
   private isLoaded = false;
 
@@ -93,7 +111,7 @@ export class FFmpegEngine implements IVideoProcessingEngine {
   async initialize(videoFile: VideoFile, onProgress?: (progress: VideoProcessingProgress) => void): Promise<void> {
     try {
       this.onProgress = onProgress;
-      this.reportProgress('initializing', 0, '加载 FFmpeg.wasm...');
+      this.reportProgress('analyzing', 0, '加载 FFmpeg.wasm...');
 
       // 动态加载 FFmpeg.wasm
       if (!window.FFmpeg) {
@@ -101,14 +119,14 @@ export class FFmpegEngine implements IVideoProcessingEngine {
       }
 
       // 创建 FFmpeg 实例
-      const { FFmpeg } = window.FFmpeg;
+      const { FFmpeg } = window.FFmpeg!;
       this.ffmpeg = new FFmpeg();
 
-      this.reportProgress('initializing', 30, '初始化 FFmpeg 实例...');
+      this.reportProgress('analyzing', 30, '初始化 FFmpeg 实例...');
 
       // 设置进度回调
       this.ffmpeg.on('progress', ({ progress }: { progress: number }) => {
-        this.reportProgress('processing', progress * 100, '处理中...');
+        this.reportProgress('encoding', progress * 100, '处理中...');
       });
 
       this.ffmpeg.on('log', ({ message }: { message: string }) => {
@@ -116,10 +134,10 @@ export class FFmpegEngine implements IVideoProcessingEngine {
       });
 
       // 加载 FFmpeg 核心
-      this.reportProgress('initializing', 60, '加载 FFmpeg 核心...');
+      this.reportProgress('analyzing', 60, '加载 FFmpeg 核心...');
       await this.ffmpeg.load();
 
-      this.reportProgress('initializing', 90, '准备视频文件...');
+      this.reportProgress('analyzing', 90, '准备视频文件...');
 
       // 将视频文件写入 FFmpeg 文件系统
       const videoData = await fetch(videoFile.url).then(r => r.arrayBuffer());
@@ -127,7 +145,7 @@ export class FFmpegEngine implements IVideoProcessingEngine {
       await this.ffmpeg.writeFile(videoFileName, new Uint8Array(videoData));
 
       this.isLoaded = true;
-      this.reportProgress('initializing', 100, 'FFmpeg 引擎初始化完成');
+      this.reportProgress('analyzing', 100, 'FFmpeg 引擎初始化完成');
 
       console.log('FFmpeg 引擎初始化成功');
     } catch (error) {
@@ -142,7 +160,7 @@ export class FFmpegEngine implements IVideoProcessingEngine {
     }
 
     try {
-      this.reportProgress('processing', 0, '分析视频片段...');
+      this.reportProgress('encoding', 0, '分析视频片段...');
 
       // 筛选保留的片段
       const keptSegments = segments
@@ -157,7 +175,7 @@ export class FFmpegEngine implements IVideoProcessingEngine {
       const outputFormat = options.format || 'mp4';
       const outputFileName = `output.${outputFormat}`;
 
-      this.reportProgress('processing', 10, '构建 FFmpeg 命令...');
+      this.reportProgress('encoding', 10, '构建 FFmpeg 命令...');
 
       // 构建 FFmpeg 命令
       const ffmpegArgs = this.buildFFmpegCommand(
@@ -168,12 +186,12 @@ export class FFmpegEngine implements IVideoProcessingEngine {
       );
 
       console.log('执行 FFmpeg 命令:', ffmpegArgs.join(' '));
-      this.reportProgress('processing', 20, '执行视频处理...');
+      this.reportProgress('encoding', 20, '执行视频处理...');
 
       // 执行 FFmpeg 命令
       await this.ffmpeg.exec(ffmpegArgs);
 
-      this.reportProgress('processing', 90, '读取处理结果...');
+      this.reportProgress('encoding', 90, '读取处理结果...');
 
       // 读取输出文件
       const outputData = await this.ffmpeg.readFile(outputFileName);
@@ -182,7 +200,7 @@ export class FFmpegEngine implements IVideoProcessingEngine {
       const mimeType = this.getMimeType(outputFormat);
       const outputBlob = new Blob([outputData], { type: mimeType });
 
-      this.reportProgress('processing', 100, '视频处理完成');
+      this.reportProgress('complete', 100, '视频处理完成');
 
       console.log('FFmpeg 视频处理完成:', {
         originalSegments: segments.length,
@@ -224,7 +242,7 @@ export class FFmpegEngine implements IVideoProcessingEngine {
     }
   }
 
-  configure(config: Record<string, any>): void {
+  configure(config: Record<string, unknown>): void {
     // FFmpeg 引擎特定的配置选项
     console.log('FFmpeg 引擎配置:', config);
   }
@@ -318,14 +336,17 @@ export class FFmpegEngine implements IVideoProcessingEngine {
     return mimeTypes[format] || 'video/mp4';
   }
 
-  private reportProgress(stage: string, progress: number, message: string) {
+  private reportProgress(
+    stage: VideoProcessingProgress['stage'],
+    progress: number,
+    message: string,
+  ) {
     if (this.onProgress) {
       this.onProgress({
-        stage: stage as any,
+        stage,
         progress: Math.min(100, Math.max(0, progress)),
         message,
-        engine: 'ffmpeg'
-      } as VideoProcessingProgress);
+      });
     }
   }
 }

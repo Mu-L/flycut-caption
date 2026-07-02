@@ -27,6 +27,7 @@ interface EnhancedVideoPlayerProps {
   onPause?: () => void;
   subtitleStyle?: SubtitleStyle;
   onSubtitleStyleChange?: (style: SubtitleStyle) => void;
+  onVideoDimensionsChange?: (dimensions: { width: number; height: number }) => void;
 }
 
 export interface EnhancedVideoPlayerRef {
@@ -40,7 +41,8 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
   onPlay,
   onPause,
   subtitleStyle,
-  onSubtitleStyleChange
+  onSubtitleStyleChange,
+  onVideoDimensionsChange,
 }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
@@ -395,10 +397,12 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
 
     const handleLoadedMetadata = () => {
       setDuration(video.duration);
-      setVideoDimensions({
+      const dimensions = {
         width: video.videoWidth,
-        height: video.videoHeight
-      });
+        height: video.videoHeight,
+      };
+      setVideoDimensions(dimensions);
+      onVideoDimensionsChange?.(dimensions);
     };
 
     const handlePlay = () => {
@@ -422,7 +426,7 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('pause', handlePause);
     };
-  }, [handleTimeUpdate, onPlay, onPause]);
+  }, [handleTimeUpdate, onPlay, onPause, onVideoDimensionsChange]);
 
   // 键盘快捷键
   useEffect(() => {
@@ -492,10 +496,15 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
           onClick={togglePlayPause}
         />
         
-        {/* 字幕覆盖层 */}
+        {/* 字幕覆盖层：始终用原始时间轴匹配 chunk.timestamp */}
         {subtitleStyle && actualVideoDisplaySize.width > 0 && actualVideoDisplaySize.height > 0 && (
           <SubtitleOverlay
-            currentTime={previewMode ? newTimelineTime : localCurrentTime}
+            currentTime={localCurrentTime}
+            visible={
+              !previewMode
+              || keptSegments.length === 0
+              || isTimeInKeptSegments(localCurrentTime)
+            }
             style={subtitleStyle}
             onStyleChange={onSubtitleStyleChange || (() => {})}
             containerDimensions={{

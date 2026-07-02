@@ -2,7 +2,8 @@
 
 import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/stores/appStore';
-import { useChunks, useSetTranscript, useHistoryStore } from '@/stores/historyStore';
+import { useChunks, useWordChunks, useHasWordTimestamps, useSetTranscript, useHistoryStore } from '@/stores/historyStore';
+import { getCuttingChunks } from '@/utils/asrTranscriptUtils';
 import { useThemeStore } from '@/stores/themeStore';
 import { useHotkeys } from '@/hooks/useHotkeys';
 import { LocaleProvider, useTranslation, useLocale } from '@/contexts/LocaleProvider';
@@ -18,8 +19,22 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { ThemeInitializer } from '@/components/ThemeInitializer';
 import { ToastContainer, MessageCenterButton } from '@/components/MessageCenter';
 import { LanguageSelector } from '@/components/LanguageSelector';
-import { SubtitleSettings, defaultSubtitleStyle } from '@/components/SubtitleSettings';
-import type { SubtitleStyle } from '@/components/SubtitleSettings';
+import { BrandLogo } from '@/components/BrandLogo';
+import { SubtitleSettings } from '@/components/SubtitleSettings';
+import {
+  defaultSubtitleStyle,
+  applyShadowSize,
+  registerSubtitleFonts,
+  serializeSubtitleExport,
+  getExportFilename,
+  getExportMimeType,
+  getExportFileTypes,
+  applyAspectPreset,
+  inferAspectPreset,
+  type SubtitleStyle,
+  type SubtitleExportFormat,
+} from '@/subtitle';
+import { isTauriRuntime } from '@/utils/runtime';
 import { cn } from '@/lib/utils';
 import {
   useStartVideoProcessing,
@@ -29,8 +44,9 @@ import {
 } from '@/stores/messageStore';
 import { UnifiedVideoProcessor } from '@/services/UnifiedVideoProcessor';
 import { saveFile } from '@/utils/createFileWriter';
-import { AudioWaveform, Download, Eye, EyeOff, Github, Maximize2, Mic2, Play, Redo2, Scissors, Upload, Wand2, Keyboard, Undo2, ZoomIn, ZoomOut, Settings, Loader2 } from 'lucide-react';
-import { calculateBlankSegments } from '@/utils/timeUtils';
+import { loadMediaFromUrl } from '@/utils/fileUtils';
+import { AudioWaveform, Download, Eye, EyeOff, Github, Link2, Maximize2, Mic2, Play, Redo2, Scissors, Upload, Wand2, Keyboard, Undo2, ZoomIn, ZoomOut, Settings, Loader2 } from 'lucide-react';
+import { runSmartCutBlank } from '@/utils/smartCutBlank';
 import { toast } from 'sonner';
 import {
   Select,
@@ -47,7 +63,7 @@ import { defaultConfig } from './types';
 
 type AimuTab = 'style' | 'tools' | 'options' | 'api';
 type ShadowSize = 'N' | 'S' | 'M' | 'L';
-type DisplayMode = 'Bilingual' | 'Main' | 'Second';
+
 
 interface BrowserPerformanceMemory {
   usedJSHeapSize: number;
@@ -146,7 +162,7 @@ async function extractWaveformPeaks(videoFile: VideoFile): Promise<number[] | nu
     }
 
     if (maxPeak <= 0) return null;
-    return peaks.map(peak => clamp(Math.sqrt(peak / maxPeak), 0.06, 1));
+    return peaks.map(peak => clamp(Math.sqrt(peak / maxPeak), 0, 1));
   } catch (error) {
     console.warn('音频波形解码失败，使用合成波形:', error);
     return null;
@@ -194,6 +210,17 @@ function MockVideoPreview({ className }: { className?: string }) {
   );
 }
 
+const TIMELINE_ZOOM_LEVELS = [
+  { pxPerSec: 5,   minorStep: 10,  majorStep: 60 },  // 10 秒/小格, 1 分钟/大格
+  { pxPerSec: 10,  minorStep: 5,   majorStep: 30 },  // 5 秒/小格, 30 秒/大格
+  { pxPerSec: 20,  minorStep: 2,   majorStep: 10 },  // 2 秒/小格, 10 秒/大格
+  { pxPerSec: 40,  minorStep: 1,   majorStep: 5 },   // 1 秒/小格, 5 秒/大格
+  { pxPerSec: 80,  minorStep: 1,   majorStep: 2 },   // 1 秒/小格, 2 秒/大格
+  { pxPerSec: 150, minorStep: 0.5, majorStep: 2 },   // 0.5 秒/小格, 2 秒/大格
+  { pxPerSec: 300, minorStep: 0.2, majorStep: 1 },   // 0.2 秒/小格, 1 秒/大格
+  { pxPerSec: 600, minorStep: 0.1, majorStep: 0.5 }, // 0.1 秒/小格, 0.5 秒/大格
+] as const;
+
 function TimelineWaveform({
   currentTime,
   duration,
@@ -217,7 +244,7 @@ function TimelineWaveform({
   const resolvedTheme = useThemeStore(state => state.resolvedTheme);
   const viewportRef = useRef<HTMLDivElement>(null);
   const waveformCanvasRef = useRef<HTMLCanvasElement>(null);
-  const [zoom, setZoom] = useState(1);
+  const [zoomIndex, setZoomIndex] = useState(2);
   const [showSubtitleLayer, setShowSubtitleLayer] = useState(true);
   const [viewportMetrics, setViewportMetrics] = useState({
     width: 0,
@@ -225,20 +252,21 @@ function TimelineWaveform({
     scrollLeft: 0,
   });
   const safeDuration = Math.max(duration, 1);
-  
-  // 基础像素密度：每秒50px，缩放会改变这个值
-  const basePixelsPerSecond = 50;
-  const pixelsPerSecond = basePixelsPerSecond * zoom;
-  
-  // 时间轴总宽度（像素）
+
+  const minZoomIndex = 0;
+  const maxZoomIndex = TIMELINE_ZOOM_LEVELS.length - 1;
+  const currentZoomLevel = TIMELINE_ZOOM_LEVELS[clamp(zoomIndex, minZoomIndex, maxZoomIndex)];
+  const pixelsPerSecond = currentZoomLevel.pxPerSec;
+  const minorTickStep = currentZoomLevel.minorStep;
+  const majorTickStep = currentZoomLevel.majorStep;
+
+  // 时间轴总宽度（像素）= 媒体时长 × 像素密度，至少铺满视口
   const timelineWidth = Math.max(safeDuration * pixelsPerSecond, viewportMetrics.width);
-  
+
   // 播放头位置（像素）
   const playheadPosition = clamp(currentTime, 0, safeDuration) * pixelsPerSecond;
-  
-  const minZoom = 0.1;
-  const maxZoom = 8;
-  const zoomPercent = Math.round(zoom * 100);
+
+  const zoomPercent = pixelsPerSecond;
 
   const activeRanges = useMemo(() => (
     chunks
@@ -269,33 +297,43 @@ function TimelineWaveform({
       const activeRange = activeRanges[rangeIndex];
       const isActive = activeRanges.length === 0 ||
         (activeRange && time >= activeRange[0] && time <= activeRange[1]);
+
+      if (!isActive) return 0;
+
       const signal =
         Math.abs(Math.sin(index * 0.37)) * 0.38 +
         Math.abs(Math.sin(index * 0.11 + 1.7)) * 0.32 +
         Math.abs(Math.sin(index * 0.023 + 0.4)) * 0.22;
       const pulse = index % 29 === 0 ? 0.2 : 0;
-      const intensity = isActive ? 0.72 : 0.2;
 
-      return clamp((signal + pulse) * intensity + (isActive ? 0.12 : 0.04), 0.08, 0.96);
+      return clamp((signal + pulse) * 0.72 + 0.12, 0.08, 0.96);
     });
   }, [activeRanges, mediaWaveformPeaks, safeDuration]);
 
   const handleZoomOut = useCallback(() => {
-    setZoom((currentZoom) => Math.max(minZoom, Number((currentZoom / 1.5).toFixed(2))));
-  }, [minZoom]);
+    setZoomIndex((index) => Math.max(minZoomIndex, index - 1));
+  }, [minZoomIndex]);
 
   const handleZoomIn = useCallback(() => {
-    setZoom((currentZoom) => Math.min(maxZoom, Number((currentZoom * 1.5).toFixed(2))));
-  }, [maxZoom]);
+    setZoomIndex((index) => Math.min(maxZoomIndex, index + 1));
+  }, [maxZoomIndex]);
 
   const handleFitTimeline = useCallback(() => {
+    // 选择让整段媒体刚好铺满视口的档位（向上取整到最近的可用档位）
     const viewportWidth = viewportRef.current?.clientWidth ?? 0;
-    const fitZoom = viewportWidth > 0
-      ? clamp(viewportWidth / (safeDuration * basePixelsPerSecond), minZoom, maxZoom)
-      : 1;
-    setZoom(Number(fitZoom.toFixed(2)));
+    if (viewportWidth <= 0) return;
+    const targetPxPerSec = viewportWidth / safeDuration;
+    let fitIndex = 0;
+    for (let i = 0; i < TIMELINE_ZOOM_LEVELS.length; i++) {
+      if (TIMELINE_ZOOM_LEVELS[i].pxPerSec >= targetPxPerSec) {
+        fitIndex = i;
+        break;
+      }
+      fitIndex = i;
+    }
+    setZoomIndex(fitIndex);
     viewportRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
-  }, [safeDuration, basePixelsPerSecond, minZoom, maxZoom]);
+  }, [safeDuration]);
 
   const handleTimelineClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (!onSeek) return;
@@ -418,17 +456,24 @@ function TimelineWaveform({
 
     const visibleStartPx = viewportMetrics.scrollLeft;
     const visibleEndPx = visibleStartPx + width;
-    const tickStep = pixelsPerSecond < 10 ? 5 : 1;
-    const labelStep = pixelsPerSecond < 14 ? 30 : pixelsPerSecond < 28 ? 10 : 5;
-    const firstTick = Math.max(0, Math.floor(visibleStartPx / pixelsPerSecond / tickStep) * tickStep);
-    const lastTick = Math.min(Math.ceil(safeDuration), Math.ceil(visibleEndPx / pixelsPerSecond));
+    // 刻度只覆盖真实媒体时长
+    const timelineEndSecond = safeDuration;
+    const tickStep = minorTickStep;
+    const ticksPerLabel = Math.max(1, Math.round(majorTickStep / minorTickStep));
+    // 以 tick 索引迭代，避免浮点累加误差
+    const firstTickIndex = Math.max(0, Math.floor(visibleStartPx / pixelsPerSecond / tickStep));
+    const lastTickIndex = Math.min(
+      Math.ceil(timelineEndSecond / tickStep),
+      Math.ceil(visibleEndPx / pixelsPerSecond / tickStep)
+    );
 
     context.font = '10px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
     context.textBaseline = 'top';
 
-    for (let second = firstTick; second <= lastTick; second += tickStep) {
+    for (let tickIndex = firstTickIndex; tickIndex <= lastTickIndex; tickIndex++) {
+      const second = tickIndex * tickStep;
       const x = Math.round(second * pixelsPerSecond - visibleStartPx) + 0.5;
-      const isMajor = second % labelStep === 0;
+      const isMajor = tickIndex % ticksPerLabel === 0;
 
       context.strokeStyle = isMajor ? textColor : mutedColor;
       context.globalAlpha = isMajor ? 0.9 : 0.45;
@@ -458,10 +503,14 @@ function TimelineWaveform({
     context.fillStyle = coralColor;
 
     for (let x = 0; x <= width; x += barStep) {
-      const time = clamp((visibleStartPx + x) / pixelsPerSecond, 0, safeDuration);
+      const time = (visibleStartPx + x) / pixelsPerSecond;
+      if (time < 0 || time > safeDuration) continue;
+
       const peakIndex = Math.floor((time / safeDuration) * (waveformPeaks.length - 1));
-      const peak = waveformPeaks[peakIndex] ?? 0.12;
-      const barHeight = Math.max(2, peak * waveformHeight * 0.88);
+      const peak = waveformPeaks[peakIndex] ?? 0;
+      if (peak <= 0.01) continue;
+
+      const barHeight = peak * waveformHeight * 0.88;
       const y = centerY - barHeight / 2;
 
       context.globalAlpha = 0.34 + peak * 0.52;
@@ -477,6 +526,8 @@ function TimelineWaveform({
     context.globalAlpha = 1;
   }, [
     pixelsPerSecond,
+    minorTickStep,
+    majorTickStep,
     resolvedTheme,
     safeDuration,
     viewportMetrics,
@@ -522,19 +573,19 @@ function TimelineWaveform({
           <button
             type="button"
             onClick={handleZoomOut}
-            disabled={zoom <= minZoom}
+            disabled={zoomIndex <= minZoomIndex}
             className="rounded p-1 hover:bg-aimu-hover hover:text-aimu-text-primary disabled:cursor-not-allowed disabled:opacity-40"
             title={t('components.subtitleEditor.zoomOut')}
           >
             <ZoomOut className="h-3.5 w-3.5" />
           </button>
-          <span className="w-10 text-center font-mono text-[10px] tabular-nums text-aimu-text-secondary">
-            {zoomPercent}%
+          <span className="w-12 text-center font-mono text-[10px] tabular-nums text-aimu-text-secondary">
+            {zoomPercent}px/s
           </span>
           <button
             type="button"
             onClick={handleZoomIn}
-            disabled={zoom >= maxZoom}
+            disabled={zoomIndex >= maxZoomIndex}
             className="rounded p-1 hover:bg-aimu-hover hover:text-aimu-text-primary disabled:cursor-not-allowed disabled:opacity-40"
             title={t('components.subtitleEditor.zoomIn')}
           >
@@ -554,7 +605,7 @@ function TimelineWaveform({
         <div ref={viewportRef} className="h-full overflow-x-auto overflow-y-hidden">
           <div
             data-testid="timeline-ruler"
-            className="relative h-full cursor-pointer overflow-hidden rounded border border-aimu-border bg-aimu-input"
+            className="relative h-full cursor-pointer rounded border border-aimu-border bg-aimu-input"
             style={{ width: `${timelineWidth}px`, minWidth: '100%' }}
             onClick={handleTimelineClick}
           >
@@ -577,7 +628,7 @@ function TimelineWaveform({
                       ? 'border-aimu-coral/45 bg-aimu-coral/18'
                       : 'border-aimu-purple/65 bg-aimu-purple/30'
                   )}
-                  style={{ left: `${leftPx}px`, width: `${Math.max(widthPx, 32)}px` }}
+                  style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
                   title={label}
                 >
                   <span
@@ -679,12 +730,10 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
   const stage = useAppStore(state => state.stage);
   const videoFile = useAppStore(state => state.videoFile);
   const shadow = useAppStore(state => state.shadow);
-  const font = useAppStore(state => state.font);
-  const display = useAppStore(state => state.display);
   const setShadow = useAppStore(state => state.setShadow);
-  const setFont = useAppStore(state => state.setFont);
-  const setDisplay = useAppStore(state => state.setDisplay);
   const chunks = useChunks();
+  const wordChunks = useWordChunks();
+  const hasWordTimestamps = useHasWordTimestamps();
   const insertBlankChunks = useHistoryStore(state => state.insertBlankChunks);
   const smartCutSilenceThreshold = useAppStore(state => state.smartCutSilenceThreshold);
   const videoDuration = useAppStore(state => state.videoPlayerState.duration);
@@ -908,11 +957,23 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // 字幕样式状态
-  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(defaultSubtitleStyle);
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(() =>
+    applyShadowSize(defaultSubtitleStyle, shadow),
+  );
+
+  useEffect(() => {
+    registerSubtitleFonts();
+  }, []);
+
+  useEffect(() => {
+    setSubtitleStyle((prev) => applyShadowSize(prev, shadow));
+  }, [shadow]);
 
   // 视频播放器引用
   const videoPlayerRef = useRef<EnhancedVideoPlayerRef>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const [urlInput, setUrlInput] = useState('');
+  const [isUrlLoading, setIsUrlLoading] = useState(false);
 
   const timelineDuration = useMemo(() => {
     const chunkEndTime = chunks.reduce((maxTime, chunk) => Math.max(maxTime, chunk.timestamp[1]), 0);
@@ -1000,65 +1061,30 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
   }, [isProcessing, currentEngine, startVideoProcessing, completeVideoProcessing, errorVideoProcessing, handleProgress, onVideoProcessed, onError, t]);
 
 
-  // 格式化时间为 SRT 格式
-  const formatTime = useCallback((seconds: number) => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-    const ms = Math.floor((seconds % 1) * 1000);
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`;
-  }, []);
-
+  const [videoMeta, setVideoMeta] = useState({ width: 1920, height: 1080 });
 
   // 导出字幕
-  const handleExportSubtitles = useCallback(async (format: 'srt' | 'json') => {
+  const handleExportSubtitles = useCallback(async (format: SubtitleExportFormat) => {
     const keptChunks = chunks.filter(chunk => !chunk.deleted);
     if (keptChunks.length === 0) {
       console.warn(t('messages.subtitle.emptySubtitleText'));
       return;
     }
 
-    let content: string;
-    let filename: string;
-    let types: Array<{
-      description: string;
-      accept: Record<string, string[]>;
-    }>;
+    const content = serializeSubtitleExport(format, keptChunks, {
+      ass: {
+        playResX: videoMeta.width,
+        playResY: videoMeta.height,
+        style: subtitleStyle,
+      },
+    });
 
-    if (format === 'srt') {
-      content = keptChunks.map((chunk, index) => {
-        const start = formatTime(chunk.timestamp[0]);
-        const end = formatTime(chunk.timestamp[1]);
-        return `${index + 1}\n${start} --> ${end}\n${chunk.text}\n`;
-      }).join('\n');
-      filename = `subtitles_${Date.now()}.srt`;
-      types = [{
-        description: 'SRT Subtitle files',
-        accept: { 'text/srt': ['.srt'] },
-      }];
-    } else {
-      content = JSON.stringify(keptChunks.map(chunk => ({
-        text: chunk.text,
-        timestamp: chunk.timestamp,
-      })), null, 2);
-      filename = `subtitles_${Date.now()}.json`;
-      types = [{
-        description: 'JSON files',
-        accept: { 'application/json': ['.json'] },
-      }];
-    }
-
-    const blob = new Blob([content], { type: 'text/plain' });
+    const filename = getExportFilename(format);
+    const types = getExportFileTypes(format);
+    const blob = new Blob([content], { type: getExportMimeType(format) });
     await saveFile(blob, filename, types);
     onExportComplete?.(blob, filename);
-  }, [chunks, formatTime, onExportComplete, t]);
-
-  // 重新上传文件
-  const handleReupload = useCallback(() => {
-    const setVideoFile = useAppStore.getState().setVideoFile;
-    setVideoFile(null);
-  }, []);
-
+  }, [chunks, videoMeta, subtitleStyle, onExportComplete, t]);
 
   const handleFileSelect = useCallback((selectedVideoFile: VideoFile) => {
     console.log('文件选择完成:', selectedVideoFile);
@@ -1141,16 +1167,37 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
     }
   }, [handleTauriFileSelect]);
 
+  const handleUrlLoad = useCallback(async () => {
+    const url = urlInput.trim();
+    if (!url || isUrlLoading) return;
+
+    setIsUrlLoading(true);
+    try {
+      const selectedVideoFile = await loadMediaFromUrl(url);
+      handleFileSelect(selectedVideoFile);
+      setUrlInput('');
+    } catch (error) {
+      console.error('URL 加载失败:', error);
+      const errorMessage = t('messages.fileUpload.urlLoadFailed');
+      setError(errorMessage);
+      toast.error(errorMessage);
+    } finally {
+      setIsUrlLoading(false);
+    }
+  }, [urlInput, isUrlLoading, handleFileSelect, setError, t]);
+
   // 从字幕生成视频片段 - 包含所有片段的删除状态和字幕信息
   const videoSegments = useMemo((): VideoSegment[] => {
-    return chunks.map(chunk => ({
+    const cuttingChunks = getCuttingChunks(chunks, wordChunks, hasWordTimestamps);
+    return cuttingChunks.map(chunk => ({
       start: chunk.timestamp[0],
       end: chunk.timestamp[1],
       keep: !chunk.deleted,
       text: chunk.text,
+      secondText: chunk.secondText,
       id: chunk.id
     }));
-  }, [chunks]);
+  }, [chunks, wordChunks, hasWordTimestamps]);
 
   // 开始视频处理
   const handleStartProcessing = useCallback(async (options: VideoProcessingOptions) => {
@@ -1180,16 +1227,20 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
 
   // 智能剪切空白段
   const handleSmartCutBlank = useCallback(() => {
-    const segments = calculateBlankSegments(chunks, smartCutSilenceThreshold, videoDuration);
-    if (segments.length === 0) {
-      toast.info(t('components.workstation.smartCutEmpty'));
-      return;
-    }
-    const totalBlank = segments.reduce((acc, seg) => acc + (seg.end - seg.start), 0);
-    insertBlankChunks(segments);
-    toast.success(t('components.workstation.smartCutDone')
-      .replace('{count}', String(segments.length))
-      .replace('{seconds}', totalBlank.toFixed(1)));
+    runSmartCutBlank({
+      chunks,
+      threshold: smartCutSilenceThreshold,
+      totalDuration: videoDuration,
+      insertBlankChunks,
+      onEmpty: () => toast.info(t('components.workstation.smartCutEmpty')),
+      onDone: (result) => {
+        toast.success(
+          t('components.workstation.smartCutDone')
+            .replace('{count}', String(result.segments.length))
+            .replace('{seconds}', result.totalBlankSeconds.toFixed(1)),
+        );
+      },
+    });
   }, [chunks, smartCutSilenceThreshold, videoDuration, insertBlankChunks, t]);
 
   // 处理视频导出配置
@@ -1199,9 +1250,12 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
       quality: options.quality,
       preserveAudio: true,
       subtitleProcessing: options.subtitleProcessing,
-      subtitleStyle: subtitleStyle, // 传递字幕样式配置
+      subtitleStyle: subtitleStyle,
+      videoWidth: videoMeta.width,
+      videoHeight: videoMeta.height,
+      engine: isTauriRuntime() ? 'ffmpeg-tauri' : undefined,
     });
-  }, [handleStartProcessing, subtitleStyle]);
+  }, [handleStartProcessing, subtitleStyle, videoMeta]);
 
   // 监听字幕变化并通知外部
   useEffect(() => {
@@ -1220,8 +1274,8 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
           {/* LEFT */}
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2">
-              <a href="https://www.aimu-app.com/" target="_blank" rel="noreferrer" className="text-lg font-bold tracking-tight hover:text-primary transition-colors">
-                {t('components.workstation.appName')}
+              <a href="https://www.aimu-app.com/" target="_blank" rel="noreferrer" className="-ml-1 rounded px-1 py-1 hover:text-primary transition-colors">
+                <BrandLogo label={t('components.workstation.appName')} />
               </a>
               <span className="text-[10px] px-1.5 py-0.5 bg-primary/10 text-primary rounded font-mono">v2.0.0</span>
             </div>
@@ -1253,14 +1307,40 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
                   <span className="text-xs font-medium text-aimu-text-primary">{t('components.workstation.dropFile')}</span>
                   <span className="mt-1 text-[10px] leading-4 text-aimu-text-muted">{t('components.workstation.supportedFormatsShort')}</span>
                 </button>
-                <button
-                  type="button"
-                  className="mt-3 flex h-8 w-full items-center justify-center gap-2 rounded border border-aimu-coral/35 bg-aimu-red-bg text-xs font-medium text-aimu-coral hover:bg-aimu-coral/15"
-                  onClick={handleReupload}
-                >
-                  <Play className="h-3.5 w-3.5" />
-                  {t('components.workstation.useMockTimeline')}
-                </button>
+                <div className="my-3 flex items-center gap-2">
+                  <div className="h-px flex-1 bg-aimu-border" />
+                  <span className="text-[10px] text-aimu-text-muted">{t('components.workstation.orDivider')}</span>
+                  <div className="h-px flex-1 bg-aimu-border" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="relative min-w-0 flex-1">
+                    <Link2 className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-aimu-text-muted" />
+                    <input
+                      data-testid="create-url-input"
+                      type="url"
+                      value={urlInput}
+                      onChange={(event) => setUrlInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          void handleUrlLoad();
+                        }
+                      }}
+                      placeholder={t('components.workstation.urlPlaceholder')}
+                      className="h-8 w-full rounded border border-aimu-border bg-aimu-input pl-8 pr-2 text-xs text-aimu-text-primary placeholder:text-aimu-text-muted focus:border-aimu-coral/50 focus:outline-none"
+                      disabled={isUrlLoading}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="create-url-load"
+                    onClick={() => void handleUrlLoad()}
+                    disabled={!urlInput.trim() || isUrlLoading}
+                    className="flex h-8 shrink-0 items-center justify-center rounded border border-aimu-coral/35 bg-aimu-red-bg px-3 text-xs font-medium text-aimu-coral transition-colors hover:bg-aimu-coral/15 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isUrlLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t('components.workstation.loadUrl')}
+                  </button>
+                </div>
               </div>
             </div>
             
@@ -1342,6 +1422,13 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
                         onTimeUpdate={(time) => setCurrentTime(time)}
                         subtitleStyle={subtitleStyle}
                         onSubtitleStyleChange={setSubtitleStyle}
+                        onVideoDimensionsChange={(dimensions) => {
+                          setVideoMeta(dimensions);
+                          const preset = inferAspectPreset(dimensions.width, dimensions.height);
+                          setSubtitleStyle((prev) => (
+                            prev.aspectPreset === preset ? prev : applyAspectPreset(prev, preset)
+                          ));
+                        }}
                       />
                     </div>
                   ) : (
@@ -1373,39 +1460,21 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
                   <div className="flex-1 overflow-y-auto p-4">
                     {activeTab === 'style' ? (
                       <div className="flex flex-col h-full space-y-4">
-                        {/* Shadow and Font selectors */}
-                        <div className="flex items-center space-x-6 text-sm">
-                          <div className="flex items-center space-x-2">
-                            <span className="text-muted-foreground font-medium">{t('components.workstation.shadow')}:</span>
-                            <Select value={shadow} onValueChange={(val) => setShadow(val as ShadowSize)}>
-                              <SelectTrigger className="h-8 w-16 bg-background">
-                                <SelectValue placeholder="N" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="N">N</SelectItem>
-                                <SelectItem value="S">S</SelectItem>
-                                <SelectItem value="M">M</SelectItem>
-                                <SelectItem value="L">L</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <div className="flex items-center space-x-2">
-                            <span className="text-muted-foreground font-medium">{t('components.workstation.font')}:</span>
-                            <Select value={font} onValueChange={(val) => setFont(val)}>
-                              <SelectTrigger className="h-8 w-56 bg-background">
-                                <SelectValue placeholder="Source Han Sans CN (Normal)" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="Source Han Sans CN (Normal)">Source Han Sans CN (Normal)</SelectItem>
-                                <SelectItem value="Arial">Arial</SelectItem>
-                                <SelectItem value="Georgia">Georgia</SelectItem>
-                                <SelectItem value="Courier New">Courier New</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
+                        <div className="flex items-center space-x-2 text-sm">
+                          <span className="text-muted-foreground font-medium">{t('components.workstation.shadow')}:</span>
+                          <Select value={shadow} onValueChange={(val) => setShadow(val as ShadowSize)}>
+                            <SelectTrigger className="h-8 w-16 bg-background">
+                              <SelectValue placeholder="N" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="N">N</SelectItem>
+                              <SelectItem value="S">S</SelectItem>
+                              <SelectItem value="M">M</SelectItem>
+                              <SelectItem value="L">L</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
-                        
+
                         <SubtitleSettings
                           style={subtitleStyle}
                           onStyleChange={setSubtitleStyle}
@@ -1429,46 +1498,6 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
 
               {/* 右侧：字幕编辑器 (SubtitleList) - 占 50% 宽度 */}
               <div className="flex-1 flex flex-col bg-background overflow-hidden">
-                {/* Subtitle list editor header */}
-                <div className="flex-shrink-0 px-2 py-1 border-b border-border bg-card flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="flex items-center space-x-2">
-                      <span className="text-xs text-muted-foreground font-medium">{t('components.workstation.display')}:</span>
-                      <Select value={display} onValueChange={(val) => setDisplay(val as DisplayMode)}>
-                        <SelectTrigger className="h-6 w-20 text-xs bg-background">
-                          <SelectValue placeholder={t('components.workstation.displayBilingual')} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Bilingual">{t('components.workstation.displayBilingual')}</SelectItem>
-                          <SelectItem value="Main">{t('components.workstation.displayMain')}</SelectItem>
-                          <SelectItem value="Second">{t('components.workstation.displaySecond')}</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    
-                    <div className="flex items-center space-x-2">
-                      <span className="text-xs text-muted-foreground font-medium">{t('components.workstation.translate')}:</span>
-                      <Select defaultValue="none">
-                        <SelectTrigger className="h-6 w-20 text-xs bg-background">
-                          <SelectValue placeholder={t('components.workstation.none')} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">{t('components.workstation.none')}</SelectItem>
-                          <SelectItem value="en">{t('components.languageSelector.english')}</SelectItem>
-                          <SelectItem value="zh">{t('components.languageSelector.chinese')}</SelectItem>
-                          <SelectItem value="ja">{t('components.languageSelector.japanese')}</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  
-                  <button className="flex items-center space-x-1 px-2.5 py-0.5 bg-primary text-primary-foreground rounded text-xs font-medium hover:opacity-90 transition-opacity">
-                    <Play className="w-3 h-3" />
-                    <span>{t('components.workstation.start')}</span>
-                  </button>
-                </div>
-
-                {/* Subtitle list */}
                 <div className="flex-1 overflow-hidden flex flex-col">
                   <div className="flex-1 overflow-hidden">
                     <SubtitleList

@@ -12,7 +12,18 @@ dist
 dist-ssr
 *.local
 
+# Rust build artifacts (Tauri + sidecars)
+target/
+
+# Local debug scratch
+.dbg/
+
+# Test reports (regenerate with pnpm test:report)
+test-results/
+
 models/*
+# 共享资源由 scripts/fetch-shared-assets.sh 在构建前拉取并打入安装包
+src-tauri/shared_assets/**/*.onnx
 public/whisper-timestamps-demo.mp4
 
 # Editor directories and files

@@ -90,7 +90,6 @@ export interface FlyCutCaptionLocale {
       selectAll: string;
       deselectAll: string;
       mergeSubtitles: string;
-      splitSubtitle: string;
       adjustTiming: string;
       startTime: string;
       endTime: string;
@@ -235,7 +234,9 @@ export interface FlyCutCaptionLocale {
       mockFileName: string;
       dropFile: string;
       supportedFormatsShort: string;
-      useMockTimeline: string;
+      orDivider: string;
+      urlPlaceholder: string;
+      loadUrl: string;
       style: string;
       tools: string;
       options: string;
@@ -356,6 +357,7 @@ export interface FlyCutCaptionLocale {
       uploadInProgress: string;
       uploadSuccess: string;
       uploadFailed: string;
+      urlLoadFailed: string;
       invalidFileType: string;
       fileTooLarge: string;
       networkError: string;

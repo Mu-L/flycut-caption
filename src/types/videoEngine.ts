@@ -4,7 +4,7 @@ import type { VideoFile, VideoSegment, VideoProcessingProgress } from './video';
 import type { SubtitleStyle } from '@/components/SubtitleSettings';
 
 // 支持的视频处理引擎类型
-export type VideoEngineType = 'webav' | 'ffmpeg' | 'webcodecs';
+export type VideoEngineType = 'webav' | 'ffmpeg' | 'ffmpeg-tauri' | 'webcodecs';
 
 // 字幕处理类型
 export type SubtitleProcessingType = 'none' | 'soft' | 'hard';
@@ -18,6 +18,8 @@ export interface VideoProcessingOptions {
   subtitleProcessing?: SubtitleProcessingType; // 字幕处理类型：无字幕、软烧录、硬烧录
   subtitleStyle?: SubtitleStyle; // 字幕样式配置
   engine?: VideoEngineType; // 指定使用的引擎
+  videoWidth?: number;
+  videoHeight?: number;
 }
 
 // 引擎能力检测结果
@@ -55,5 +57,5 @@ export interface IVideoProcessingEngine {
   cleanup(): Promise<void>;
   
   // 引擎特定的配置
-  configure?(config: Record<string, any>): void;
+  configure?(config: Record<string, unknown>): void;
 }

@@ -7,7 +7,7 @@ export function StoreInitializer() {
   
   useEffect(() => {
     initialize()
-  }, [])
+  }, [initialize])
   
   return null
 }

@@ -16,8 +16,9 @@ import { useAppStore } from '@/stores/appStore';
 import { asrService } from '@/services/asrService';
 import { WEB_ASR_MODELS, WEB_MODEL_FAMILY_LABELS } from '@/config/webAsrModels';
 import { isTauriRuntime } from '@/utils/runtime';
+import { WEB_MODELS_DOWNLOADED_EVENT } from '@/services/webModelCache';
 
-type ReadyWebModels = Record<string, boolean>;
+type DownloadedWebModels = Record<string, boolean>;
 type DownloadType = string | null;
 
 interface ModelDownloadPanelProps {
@@ -40,7 +41,7 @@ export function ModelDownloadPanel({ className }: ModelDownloadPanelProps) {
   const [isTauri, setIsTauri] = useState(false);
 
   // —— 浏览器模型状态 ——
-  const [readyWebModels, setReadyWebModels] = useState<ReadyWebModels>({});
+  const [downloadedWebModels, setDownloadedWebModels] = useState<DownloadedWebModels>({});
   const [whisperProgress, setWhisperProgress] = useState<ASRProgress | null>(null);
 
   // —— 桌面端模型状态 ——
@@ -55,18 +56,33 @@ export function ModelDownloadPanel({ className }: ModelDownloadPanelProps) {
   const deviceType = useAppStore((s) => s.deviceType);
   const webModelId = useAppStore((s) => s.webModelId);
 
-  const refreshReadyWebModels = useCallback(() => {
-    const next: ReadyWebModels = {};
+  const refreshDownloadedWebModels = useCallback(async () => {
+    const ids = await asrService.checkAllWebModelsDownloaded();
+    const next: DownloadedWebModels = {};
     for (const m of WEB_ASR_MODELS) {
-      next[m.id] = asrService.isWebModelReady(m.id);
+      next[m.id] = ids.includes(m.id);
     }
-    setReadyWebModels(next);
+    setDownloadedWebModels(next);
   }, []);
 
   useEffect(() => {
-    setIsTauri(isTauriRuntime());
-    refreshReadyWebModels();
-  }, [webModelId, deviceType, refreshReadyWebModels]);
+    const tauri = isTauriRuntime();
+    setIsTauri(tauri);
+    if (!tauri) {
+      void refreshDownloadedWebModels();
+    }
+  }, [refreshDownloadedWebModels]);
+
+  useEffect(() => {
+    if (isTauri) return;
+    const handler = () => { void refreshDownloadedWebModels(); };
+    window.addEventListener(WEB_MODELS_DOWNLOADED_EVENT, handler);
+    window.addEventListener('focus', handler);
+    return () => {
+      window.removeEventListener(WEB_MODELS_DOWNLOADED_EVENT, handler);
+      window.removeEventListener('focus', handler);
+    };
+  }, [isTauri, refreshDownloadedWebModels]);
 
   const loadClientStatus = useCallback(async () => {
     if (!isTauriRuntime()) return;
@@ -143,15 +159,15 @@ export function ModelDownloadPanel({ className }: ModelDownloadPanelProps) {
 
   const startDownloadWebModel = useCallback(async (targetWebModelId: string) => {
     setDownloadingType(`web-${targetWebModelId}`);
-    setWhisperProgress(null);
+    setWhisperProgress({ status: 'loading', data: '准备下载...', progress: 0 });
     setError(null);
 
-    asrService.setWhisperProgressCallback((progress) => {
+    const unsubscribe = asrService.addWhisperProgressCallback((progress) => {
       setWhisperProgress(progress);
-      if (progress.status === 'loaded') {
+      if (progress.status === 'downloaded') {
         setDownloadingType(null);
         setError(null);
-        setReadyWebModels((prev) => ({ ...prev, [targetWebModelId]: true }));
+        setDownloadedWebModels((prev) => ({ ...prev, [targetWebModelId]: true }));
       }
       if (progress.status === 'error') {
         setDownloadingType(null);
@@ -160,27 +176,30 @@ export function ModelDownloadPanel({ className }: ModelDownloadPanelProps) {
     });
 
     try {
-      await asrService.preloadWebModel(targetWebModelId, deviceType);
+      await asrService.downloadWebModel(targetWebModelId, deviceType);
     } catch (err) {
       setDownloadingType(null);
       const message = err instanceof Error ? err.message : String(err);
       console.error('[ModelDownload] Web model download failed:', err);
       setError(message);
+    } finally {
+      unsubscribe();
     }
   }, [deviceType]);
 
   const renderDownloadButton = (
-    isReady: boolean,
+    isDownloaded: boolean,
     isDownloading: boolean,
     onClick: () => void,
+    downloadedLabel = '已下载',
   ) => (
     <button
       type="button"
       onClick={onClick}
-      disabled={isDownloading || isReady}
+      disabled={isDownloading || isDownloaded}
       className={cn(
         'flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-medium shrink-0 transition-colors',
-        isReady
+        isDownloaded
           ? 'bg-green-100 text-green-700 cursor-default dark:bg-green-900/30 dark:text-green-400'
           : isDownloading
             ? 'bg-muted text-muted-foreground cursor-wait'
@@ -189,12 +208,12 @@ export function ModelDownloadPanel({ className }: ModelDownloadPanelProps) {
     >
       {isDownloading ? (
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      ) : isReady ? (
+      ) : isDownloaded ? (
         <CheckCircle2 className="h-3.5 w-3.5" />
       ) : (
         <Download className="h-3.5 w-3.5" />
       )}
-      <span>{isDownloading ? '下载中' : isReady ? '已就绪' : '下载'}</span>
+      <span>{isDownloading ? '下载中' : isDownloaded ? downloadedLabel : '下载'}</span>
     </button>
   );
 
@@ -233,26 +252,33 @@ export function ModelDownloadPanel({ className }: ModelDownloadPanelProps) {
     );
   };
 
-  const renderWebCardProgress = (progress: ASRProgress) => {
-    const pct = progress.progress ?? 0;
+  const renderWebCardProgress = (progress: ASRProgress | null, isDownloading: boolean) => {
+    if (!isDownloading) return null;
+
+    const pct = progress?.progress;
+    const hasPct = pct !== undefined;
+    const label = progress?.data || progress?.file || '下载中...';
+
     return (
       <div className="space-y-1.5 pt-2 border-t border-border/60">
         <div className="flex items-center justify-between text-xs">
           <span className="text-muted-foreground truncate max-w-[75%]">
-            {progress.data || progress.file || '下载中...'}
+            {label}
           </span>
-          {progress.progress !== undefined && (
-            <span className="font-medium tabular-nums">{Math.round(pct)}%</span>
-          )}
+          <span className="font-medium tabular-nums">
+            {hasPct ? `${Math.round(pct)}%` : '...'}
+          </span>
         </div>
-        {progress.progress !== undefined && (
-          <div className="w-full bg-muted rounded-full h-1.5">
+        <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+          {hasPct ? (
             <div
               className="h-1.5 rounded-full bg-primary transition-all duration-300"
               style={{ width: `${pct}%` }}
             />
-          </div>
-        )}
+          ) : (
+            <div className="h-1.5 w-1/3 rounded-full bg-primary animate-pulse" />
+          )}
+        </div>
       </div>
     );
   };
@@ -286,17 +312,17 @@ export function ModelDownloadPanel({ className }: ModelDownloadPanelProps) {
                   {label}
                 </h5>
                 {familyModels.map((model) => {
-                  const isReady = readyWebModels[model.id] ?? false;
+                  const isDownloaded = downloadedWebModels[model.id] ?? false;
                   const isDownloading = downloadingType === `web-${model.id}`;
                   const isActive = webModelId === model.id;
-                  const showProgress = isDownloading && whisperProgress;
+                  const showProgress = isDownloading;
 
                   return (
                     <div
                       key={model.id}
                       className={cn(
                         'p-3 border rounded-md bg-background space-y-0',
-                        isReady && 'border-green-300 bg-green-50 dark:bg-green-950/20',
+                        isDownloaded && 'border-green-300 bg-green-50 dark:bg-green-950/20',
                       )}
                     >
                       <div className="flex items-center justify-between gap-3">
@@ -318,10 +344,10 @@ export function ModelDownloadPanel({ className }: ModelDownloadPanelProps) {
                                 当前
                               </span>
                             )}
-                            {isReady && (
+                            {isDownloaded && (
                               <span className="text-xs text-green-600 flex items-center shrink-0">
                                 <CheckCircle2 className="h-3 w-3 mr-0.5" />
-                                已就绪
+                                已下载
                               </span>
                             )}
                           </div>
@@ -335,9 +361,17 @@ export function ModelDownloadPanel({ className }: ModelDownloadPanelProps) {
                             )}
                           </p>
                         </div>
-                        {renderDownloadButton(isReady, isDownloading, () => startDownloadWebModel(model.id))}
+                        {renderDownloadButton(
+                          isDownloaded,
+                          isDownloading,
+                          () => startDownloadWebModel(model.id),
+                          '已下载',
+                        )}
                       </div>
-                      {showProgress && renderWebCardProgress(whisperProgress)}
+                      {showProgress && renderWebCardProgress(
+                        downloadingType === `web-${model.id}` ? whisperProgress : null,
+                        isDownloading,
+                      )}
                     </div>
                   );
                 })}

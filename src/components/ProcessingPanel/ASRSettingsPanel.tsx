@@ -10,10 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { BrainCircuit, Globe, Cpu, AlertCircle, Settings } from 'lucide-react';
 import type { AllModelsStatus, AvailableModel } from '@/types/model';
 import { asrService } from '@/services/asrService';
-import { getWebAsrModel, WEB_ASR_MODELS } from '@/config/webAsrModels';
+import { getWebAsrModel } from '@/config/webAsrModels';
 import { getRuntimeAsrEngineType, isTauriRuntime } from '@/utils/runtime';
 import { useActiveModelTimestamp } from '@/hooks/useActiveModelTimestamp';
+import { useActiveModelLanguageConfig } from '@/hooks/useActiveModelLanguageConfig';
 import { shouldAdvertiseWordLevelDelete } from '@/utils/wordLevelEdit';
+import { WEB_MODELS_DOWNLOADED_EVENT } from '@/services/webModelCache';
 
 interface ASRSettingsPanelProps {
   className?: string;
@@ -38,9 +40,10 @@ export function ASRSettingsPanel({ className, onOpenSettings }: ASRSettingsPanel
 
   const [isTauri, setIsTauri] = useState(false);
   const [downloadedModels, setDownloadedModels] = useState<string[]>([]);
+  const [downloadedWebModels, setDownloadedWebModels] = useState<string[]>([]);
   const [allModels, setAllModels] = useState<AvailableModel[]>([]);
-  const [currentWebModelReady, setCurrentWebModelReady] = useState(false);
   const activeModelTimestamp = useActiveModelTimestamp();
+  const languageConfig = useActiveModelLanguageConfig();
   const supportsWordLevelDelete = shouldAdvertiseWordLevelDelete(activeModelTimestamp);
 
   useEffect(() => {
@@ -53,7 +56,9 @@ export function ASRSettingsPanel({ className, onOpenSettings }: ASRSettingsPanel
     }
 
     if (!tauri) {
-      setCurrentWebModelReady(asrService.isWebModelReady(webModelId));
+      asrService.checkAllWebModelsDownloaded()
+        .then(setDownloadedWebModels)
+        .catch((err) => console.error('Failed to check web models:', err));
       return;
     }
 
@@ -69,8 +74,19 @@ export function ASRSettingsPanel({ className, onOpenSettings }: ASRSettingsPanel
 
   useEffect(() => {
     if (isTauri) return;
-    setCurrentWebModelReady(asrService.isWebModelReady(webModelId));
-  }, [isTauri, webModelId, deviceType]);
+    const refresh = () => {
+      asrService.checkAllWebModelsDownloaded()
+        .then(setDownloadedWebModels)
+        .catch(() => {});
+    };
+    refresh();
+    window.addEventListener(WEB_MODELS_DOWNLOADED_EVENT, refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.removeEventListener(WEB_MODELS_DOWNLOADED_EVENT, refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [isTauri]);
 
   useEffect(() => {
     if (!isTauri) return;
@@ -116,6 +132,7 @@ export function ASRSettingsPanel({ className, onOpenSettings }: ASRSettingsPanel
   const changeWebModel = useCallback(
     (modelId: string) => {
       setWebModelId(modelId);
+      asrService.setWebModel(modelId);
       const meta = getWebAsrModel(modelId);
       showInfo('模型切换成功', `已切换到 ${meta?.name || modelId}`);
     },
@@ -123,7 +140,7 @@ export function ASRSettingsPanel({ className, onOpenSettings }: ASRSettingsPanel
   );
 
   const currentModelDownloaded = downloadedModels.includes(asrModelId);
-  const currentWebModelKnown = !!getWebAsrModel(webModelId);
+  const currentWebModelDownloaded = downloadedWebModels.includes(webModelId);
 
   const downloadHint = (label: string) => (
     <div className="flex items-center gap-2 p-1.5 border rounded-md bg-amber-50 dark:bg-amber-950/20 text-xs">
@@ -156,6 +173,7 @@ export function ASRSettingsPanel({ className, onOpenSettings }: ASRSettingsPanel
               language={language}
               onLanguageChange={changeLanguage}
               disabled={isLoading}
+              mode={languageConfig.mode}
               placeholder="搜索语言..."
             />
           </div>
@@ -186,19 +204,28 @@ export function ASRSettingsPanel({ className, onOpenSettings }: ASRSettingsPanel
             <BrainCircuit className="h-3.5 w-3.5" />
             <span>浏览器识别模型</span>
           </label>
-          <Select
-            value={currentWebModelKnown ? webModelId : WEB_ASR_MODELS[0]?.id}
-            onValueChange={(v) => changeWebModel(v)}
-            disabled={isLoading}
-          >
-            <SelectTrigger size="sm" className="w-full text-xs h-8">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <WebModelSelectItems />
-            </SelectContent>
-          </Select>
-          {!currentWebModelReady && downloadHint('当前模型尚未加载，识别前需先下载')}
+          {downloadedWebModels.length > 0 ? (
+            <Select
+              value={
+                currentWebModelDownloaded
+                  ? webModelId
+                  : (downloadedWebModels[0] ?? webModelId)
+              }
+              onValueChange={(v) => changeWebModel(v)}
+              disabled={isLoading}
+            >
+              <SelectTrigger size="sm" className="w-full text-xs h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <WebModelSelectItems downloadedModelIds={downloadedWebModels} />
+              </SelectContent>
+            </Select>
+          ) : (
+            downloadHint('未下载浏览器模型')
+          )}
+          {downloadedWebModels.length > 0 && !currentWebModelDownloaded
+            && downloadHint('当前模型尚未下载，识别前需先下载')}
           {supportsWordLevelDelete && (
             <p className="text-[11px] text-muted-foreground">
               该模型支持字词级时间戳，识别后可按字词删除并精剪视频。
@@ -222,6 +249,7 @@ export function ASRSettingsPanel({ className, onOpenSettings }: ASRSettingsPanel
             language={language}
             onLanguageChange={changeLanguage}
             disabled={isLoading}
+            mode={languageConfig.mode}
             placeholder="搜索语言..."
           />
         </div>

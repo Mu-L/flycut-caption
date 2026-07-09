@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import { formatTime } from '@/utils/timeUtils';
 import { useChunks } from '@/stores/historyStore';
 import { SubtitleOverlay } from './SubtitleOverlay';
-import type { SubtitleStyle } from '@/components/SubtitleSettings';
+import type { SubtitleStyle, SubtitleDisplayMode } from '@/components/SubtitleSettings';
 import {
   Play,
   Pause,
@@ -25,8 +25,10 @@ interface EnhancedVideoPlayerProps {
   onTimeUpdate?: (time: number) => void;
   onPlay?: () => void;
   onPause?: () => void;
-  subtitleStyle?: SubtitleStyle;
-  onSubtitleStyleChange?: (style: SubtitleStyle) => void;
+  primaryStyle?: SubtitleStyle;
+  secondaryStyle?: SubtitleStyle;
+  displayMode?: SubtitleDisplayMode;
+  onPrimaryStyleChange?: (style: SubtitleStyle) => void;
   onVideoDimensionsChange?: (dimensions: { width: number; height: number }) => void;
 }
 
@@ -40,8 +42,10 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
   onTimeUpdate,
   onPlay,
   onPause,
-  subtitleStyle,
-  onSubtitleStyleChange,
+  primaryStyle,
+  secondaryStyle,
+  displayMode,
+  onPrimaryStyleChange,
   onVideoDimensionsChange,
 }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -89,11 +93,8 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
       return { width: displayWidth, height: displayHeight };
     }
   }, [containerSize, videoDimensions]);
-  
-  // 字幕相关状态 - 移除本地状态，使用外部传入的
-  // const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(defaultSubtitleStyle);
-  // const [showSubtitleSettings, setShowSubtitleSettings] = useState(false);
-  
+
+  // 字幕样式由外部传入（primaryStyle/secondaryStyle/displayMode）
   // 基于 chunks 数据计算保留的片段
   const keptSegments = useMemo(() => {
     return chunks
@@ -108,40 +109,17 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
       .sort((a, b) => a.start - b.start);
   }, [chunks]);
 
-  // 删除的片段 - 暂时未使用，但保留以备将来可能的功能扩展
-  // const deletedSegments = useMemo(() => {
-  //   return chunks
-  //     .filter(chunk => chunk.deleted)
-  //     .map(chunk => ({
-  //       id: chunk.id,
-  //       start: chunk.timestamp[0],
-  //       end: chunk.timestamp[1],
-  //       duration: chunk.timestamp[1] - chunk.timestamp[0],
-  //       text: chunk.text
-  //     }))
-  //     .sort((a, b) => a.start - b.start);
-  // }, [chunks]);
-
-  // 计算新时间轴时间（预览模式下的压缩时间）
-  const newTimelineTime = useMemo(() => {
-    if (!previewMode || keptSegments.length === 0) return localCurrentTime;
-    
-    let newTime = 0;
-    for (const segment of keptSegments) {
-      if (localCurrentTime >= segment.start && localCurrentTime <= segment.end) {
-        // 当前时间在这个保留片段内
-        newTime += localCurrentTime - segment.start;
-        break;
-      } else if (localCurrentTime > segment.end) {
-        // 当前时间在这个片段之后
-        newTime += segment.duration;
-      } else {
-        // 当前时间在这个片段之前
-        break;
-      }
-    }
-    return newTime;
-  }, [localCurrentTime, previewMode, keptSegments]);
+  // 被删除的片段（用于原始时间轴上以红色标记）
+  const deletedSegments = useMemo(() => {
+    return chunks
+      .filter(chunk => chunk.deleted)
+      .map(chunk => ({
+        id: chunk.id,
+        start: chunk.timestamp[0],
+        end: chunk.timestamp[1],
+      }))
+      .sort((a, b) => a.start - b.start);
+  }, [chunks]);
 
   // 新时间轴总时长
   const newTimelineDuration = useMemo(() => {
@@ -304,6 +282,8 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
     
     videoRef.current.currentTime = videoTime;
     setLocalCurrentTime(videoTime);
+    // dragTime 始终保存原始时间轴坐标，便于进度条直接定位
+    setDragTime(videoTime);
   }, [previewMode, newTimelineDuration, duration, isPlaying, keptSegments]);
 
   const handleProgressMouseMove = useCallback((e: MouseEvent) => {
@@ -342,6 +322,8 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
     
     videoRef.current.currentTime = videoTime;
     setLocalCurrentTime(videoTime);
+    // dragTime 始终保存原始时间轴坐标
+    setDragTime(videoTime);
   }, [isDragging, previewMode, newTimelineDuration, duration, keptSegments]);
 
   const handleProgressMouseUp = useCallback(() => {
@@ -497,7 +479,7 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
         />
         
         {/* 字幕覆盖层：始终用原始时间轴匹配 chunk.timestamp */}
-        {subtitleStyle && actualVideoDisplaySize.width > 0 && actualVideoDisplaySize.height > 0 && (
+        {primaryStyle && actualVideoDisplaySize.width > 0 && actualVideoDisplaySize.height > 0 && (
           <SubtitleOverlay
             currentTime={localCurrentTime}
             visible={
@@ -505,8 +487,10 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
               || keptSegments.length === 0
               || isTimeInKeptSegments(localCurrentTime)
             }
-            style={subtitleStyle}
-            onStyleChange={onSubtitleStyleChange || (() => {})}
+            primaryStyle={primaryStyle}
+            secondaryStyle={secondaryStyle}
+            displayMode={displayMode}
+            onPrimaryStyleChange={onPrimaryStyleChange || (() => {})}
             containerDimensions={{
               width: actualVideoDisplaySize.width,
               height: actualVideoDisplaySize.height
@@ -536,39 +520,42 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
               )}
               onMouseDown={handleProgressMouseDown}
             >
-              {/* 背景进度条 */}
+              {/* 进度条始终基于原始时间轴：被删段以红色标记 */}
+              {/* 已播放填充（原始时间轴） */}
               <div 
                 className={cn(
                   "h-full bg-primary/30 transition-all",
                   isDragging && "transition-none"
                 )}
                 style={{ 
-                  width: `${((isDragging ? dragTime : (previewMode ? newTimelineTime : localCurrentTime)) / (previewMode ? newTimelineDuration : duration)) * 100}%` 
+                  width: `${Math.min(100, ((isDragging ? dragTime : localCurrentTime) / duration) * 100)}%` 
                 }}
               />
-              
-              {/* 保留片段显示（在预览模式下） */}
+
+              {/* 被删除片段：红色标记（原始时间轴） */}
+              {deletedSegments.map((segment) => (
+                <div
+                  key={segment.id}
+                  className="absolute top-0 h-full bg-aimu-coral/70 pointer-events-none"
+                  style={{
+                    left: `${(segment.start / duration) * 100}%`,
+                    width: `${((segment.end - segment.start) / duration) * 100}%`,
+                  }}
+                />
+              ))}
+
+              {/* 保留片段：预览模式下以绿色叠加，直观显示“保留区间” */}
               {previewMode && keptSegments.length > 0 && (
-                <>
-                  {keptSegments.map((segment, index) => {
-                    // 计算在新时间轴上的位置
-                    let segmentStartInNewTimeline = 0;
-                    for (let i = 0; i < index; i++) {
-                      segmentStartInNewTimeline += keptSegments[i].duration;
-                    }
-                    
-                    return (
-                      <div
-                        key={segment.id}
-                        className="absolute top-0 h-full bg-green-500/60 pointer-events-none"
-                        style={{
-                          left: `${(segmentStartInNewTimeline / newTimelineDuration) * 100}%`,
-                          width: `${(segment.duration / newTimelineDuration) * 100}%`,
-                        }}
-                      />
-                    );
-                  })}
-                </>
+                keptSegments.map((segment) => (
+                  <div
+                    key={segment.id}
+                    className="absolute top-0 h-full bg-green-500/50 pointer-events-none"
+                    style={{
+                      left: `${(segment.start / duration) * 100}%`,
+                      width: `${((segment.end - segment.start) / duration) * 100}%`,
+                    }}
+                  />
+                ))
               )}
               
               {/* 当前进度 */}
@@ -578,9 +565,7 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
                   isDragging && "transition-none"
                 )}
                 style={{ 
-                  width: isDragging 
-                    ? `${dragPercentage * 100}%` // 拖拽时直接使用百分比
-                    : `${((previewMode ? newTimelineTime : localCurrentTime) / (previewMode ? newTimelineDuration : duration)) * 100}%`
+                  width: `${Math.min(100, ((isDragging ? dragTime : localCurrentTime) / duration) * 100)}%`
                 }}
               />
               
@@ -591,9 +576,7 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
                   isDragging ? "scale-125 transition-none" : "hover:scale-110 opacity-0 group-hover:opacity-100"
                 )}
                 style={{
-                  left: isDragging 
-                    ? `${dragPercentage * 100}%` // 拖拽时直接使用鼠标位置百分比
-                    : `${((previewMode ? newTimelineTime : localCurrentTime) / (previewMode ? newTimelineDuration : duration)) * 100}%`,
+                  left: `${Math.min(100, ((isDragging ? dragTime : localCurrentTime) / duration) * 100)}%`,
                   opacity: isDragging ? 1 : undefined
                 }}
               />
@@ -616,10 +599,10 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
           {/* 时间显示 */}
           <div className="flex justify-between text-sm text-muted-foreground">
             <span>
-              {formatTime(isDragging ? dragTime : (previewMode ? newTimelineTime : localCurrentTime))}
+              {formatTime(isDragging ? dragTime : localCurrentTime)}
               {isDragging && <span className="ml-1 text-primary">●</span>}
             </span>
-            <span>{formatTime(previewMode ? newTimelineDuration : duration)}</span>
+            <span>{formatTime(duration)}</span>
           </div>
         </div>
 
@@ -700,9 +683,9 @@ export const EnhancedVideoPlayer = forwardRef<EnhancedVideoPlayerRef, EnhancedVi
         {previewMode && keptSegments.length > 0 && (
           <div className="text-xs text-muted-foreground bg-muted/50 rounded p-2">
             <div className="flex justify-between">
-              <span>预览模式：自动跳过删除片段</span>
+              <span>预览模式：自动跳过红色标记片段</span>
               <span>
-                节省时间: {formatTime(duration - newTimelineDuration)} 
+                剪辑后时长: {formatTime(newTimelineDuration)} 
                 ({((newTimelineDuration / duration) * 100).toFixed(1)}% 保留)
               </span>
             </div>

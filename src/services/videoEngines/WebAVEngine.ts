@@ -9,7 +9,7 @@ import type {
   VideoProcessingOptions 
 } from '@/types/videoEngine';
 import type { SubtitleChunk as TranscriptChunk } from '@/types/subtitle';
-import type { SubtitleStyle } from '@/subtitle';
+import type { SubtitleStyle, SubtitleStylePair, SubtitleDisplayMode } from '@/subtitle';
 import {
   defaultSubtitleStyle,
   resolveExportSubtitleMetrics,
@@ -196,16 +196,19 @@ export class WebAVEngine implements IVideoProcessingEngine {
         );
       }
 
-      // 从 segments 中提取字幕信息
-      const subtitleChunks = segments
-        .filter(seg => seg.text && seg.id) // 只处理有字幕文本和ID的片段
-        .map(seg => ({
-          id: seg.id ?? `${seg.start}-${seg.end}`,
-          text: seg.text!,
-          secondText: seg.secondText,
-          timestamp: [seg.start, seg.end] as [number, number],
-          deleted: !seg.keep,
-        })) as TranscriptChunk[];
+      // 优先使用上层传入的字幕 chunks（与 FFmpegTauriEngine 一致）；
+      // 无删除时 buildVideoExportSegments 返回的 segment 不携带 text/id，
+      // 从 segments 提取会拿不到字幕，导致 Web 端硬烧录无字幕。
+      const subtitleChunks: TranscriptChunk[] = options.subtitleChunks
+        ?? segments
+          .filter(seg => seg.text && seg.id)
+          .map(seg => ({
+            id: seg.id ?? `${seg.start}-${seg.end}`,
+            text: seg.text!,
+            secondText: seg.secondText,
+            timestamp: [seg.start, seg.end] as [number, number],
+            deleted: !seg.keep,
+          }));
 
       const subtitleMode = options.subtitleProcessing ?? 'none';
       if (subtitleMode !== 'none' && subtitleChunks.length > 0) {
@@ -214,7 +217,13 @@ export class WebAVEngine implements IVideoProcessingEngine {
         }
 
         this.reportProgress('processing', 75, '烧录字幕到视频画面...');
-        await this.addBurnedSubtitles(subtitleChunks, keptSegments, options.subtitleStyle);
+        await this.addBurnedSubtitles(
+          subtitleChunks,
+          keptSegments,
+          options.subtitleStylePair,
+          options.subtitleExportMode,
+          options.subtitleStyle,
+        );
         this.reportProgress('processing', 78, '字幕烧录完成');
       }
 
@@ -412,27 +421,39 @@ export class WebAVEngine implements IVideoProcessingEngine {
 
   /**
    * 硬烧录字幕到视频画面（WebAV EmbedSubtitlesClip）
+   *
+   * 注意：EmbedSubtitlesClip 只支持单一样式，Bilingual 模式降级为
+   * primaryStyle + formatBilingualText 合并文本（副字幕样式与主字幕一致）。
+   * Main 模式用 primaryStyle；Second 模式用 secondaryStyle。
    */
   private async addBurnedSubtitles(
     subtitleChunks: TranscriptChunk[],
     keptSegments: VideoSegment[],
-    subtitleStyle?: SubtitleStyle
+    stylePair?: SubtitleStylePair,
+    exportMode?: SubtitleDisplayMode,
+    fallbackStyle?: SubtitleStyle,
   ): Promise<void> {
     if (!this.combinator || !this.videoClip) {
       return;
     }
-    
+
     try {
-      const effectiveStyle = subtitleStyle ?? defaultSubtitleStyle;
+      const fallback = fallbackStyle ?? defaultSubtitleStyle;
+      const pair: SubtitleStylePair = stylePair
+        ?? { primary: fallback, secondary: fallback };
+      const mode: SubtitleDisplayMode = exportMode ?? 'Bilingual';
+      // Bilingual/Main 用 primary；Second 用 secondary
+      const effectiveStyle = mode === 'Second' ? pair.secondary : pair.primary;
 
       const subtitleStructs = this.generateSubtitleStructs(
         subtitleChunks,
         keptSegments,
-        effectiveStyle,
+        pair,
+        mode,
         this.videoClip.meta.width,
         this.videoClip.meta.height,
       );
-      
+
       if (subtitleStructs.length === 0) {
         console.warn('没有字幕内容可以添加');
         return;
@@ -471,35 +492,40 @@ export class WebAVEngine implements IVideoProcessingEngine {
           } : undefined,
         })
       );
-      
+
       // 设置字幕时间（覆盖整个视频时长）
       const totalDuration = keptSegments.reduce((total, seg) => {
         return total + (seg.end - seg.start);
       }, 0) * 1e6; // 转换为微秒
-      
+
       subtitleSprite.time = {
         offset: 0,
         duration: totalDuration,
       };
-      
+
       // 设置 z-index 确保字幕在视频上方
       subtitleSprite.zIndex = 10;
-      
+
       // 添加到合成器
       await this.combinator.addSprite(subtitleSprite);
-      
+
     } catch (error) {
       console.error('字幕烧录失败:', error);
     }
   }
-  
+
   /**
-   * 生成 SubtitleStruct 数组，时间单位为微秒
+   * 生成 SubtitleStruct 数组，时间单位为微秒。
+   * 按 exportMode 过滤/合并文本：
+   * - 'Main'：text = chunk.text（跳过无 text）
+   * - 'Second'：text = chunk.secondText（跳过无 secondText）
+   * - 'Bilingual'：text = formatBilingualText（用 primaryStyle 合并，降级单样式）
    */
   private generateSubtitleStructs(
     subtitleChunks: TranscriptChunk[],
     keptSegments: VideoSegment[],
-    style: SubtitleStyle,
+    stylePair: SubtitleStylePair,
+    exportMode: SubtitleDisplayMode,
     videoWidth: number,
     videoHeight: number,
   ): SubtitleStruct[] {
@@ -511,13 +537,24 @@ export class WebAVEngine implements IVideoProcessingEngine {
       const mappedTime = timeMapping.get(chunk);
       if (!mappedTime || mappedTime.end <= mappedTime.start) continue;
 
-      const text = formatBilingualText(
-        chunk.text,
-        chunk.secondText,
-        style,
-        videoWidth,
-        videoHeight,
-      );
+      let text: string;
+      if (exportMode === 'Main') {
+        text = chunk.text;
+        if (!text?.trim()) continue;
+      } else if (exportMode === 'Second') {
+        text = chunk.secondText ?? '';
+        if (!text.trim()) continue;
+      } else {
+        // Bilingual：降级为单样式合并文本
+        text = formatBilingualText(
+          chunk.text,
+          chunk.secondText,
+          stylePair.primary,
+          videoWidth,
+          videoHeight,
+        );
+        if (!text.trim()) continue;
+      }
 
       subtitleStructs.push({
         start: secondsToMicroseconds(mappedTime.start),
@@ -525,8 +562,8 @@ export class WebAVEngine implements IVideoProcessingEngine {
         text,
       });
     }
-    
+
     return subtitleStructs;
   }
-  
+
 }

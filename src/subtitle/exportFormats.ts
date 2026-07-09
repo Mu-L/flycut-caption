@@ -1,7 +1,9 @@
 import type { SubtitleChunk } from '@/types/subtitle';
-import type { SubtitleStyle } from './subtitleStyle';
-import { defaultSubtitleStyle, getStyleFontFamily } from './subtitleStyle';
+import type { SubtitleStyle, SubtitleStylePair } from './subtitleStyle';
+import type { SubtitleDisplayMode } from './subtitleRenderer';
+import { defaultSubtitleStylePair, getStyleFontFamily } from './subtitleStyle';
 import { REFERENCE_VIDEO_HEIGHT } from '@/config/subtitleFonts';
+import { stripSubtitleDisplayPunctuation } from './cjkPunctuation';
 
 export type SubtitleExportFormat = 'srt' | 'json' | 'vtt' | 'ass';
 
@@ -29,7 +31,20 @@ function formatAssTime(seconds: number): string {
   return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${centis.toString().padStart(2, '0')}`;
 }
 
-function chunkBody(chunk: SubtitleChunk): string {
+/**
+ * 按 exportMode 提取字幕正文。
+ * - 'Main'：仅主字幕 text
+ * - 'Second'：仅副字幕 secondText（无则返回空串，调用方应跳过）
+ * - 'Bilingual'：主+副（用 \n 分隔），无副字幕时仅主
+ */
+function chunkBody(chunk: SubtitleChunk, exportMode: SubtitleDisplayMode): string {
+  if (exportMode === 'Main') {
+    return chunk.text;
+  }
+  if (exportMode === 'Second') {
+    return chunk.secondText?.trim() ? chunk.secondText : '';
+  }
+  // Bilingual
   if (chunk.secondText?.trim()) {
     return `${chunk.text}\n${chunk.secondText}`;
   }
@@ -47,53 +62,17 @@ function hexToAssColor(hex: string, opacity = 1): string {
   return `&H${alpha}${b}${g}${r}`.toUpperCase();
 }
 
-export function chunksToSrt(chunks: SubtitleChunk[]): string {
-  return chunks
-    .filter((c) => !c.deleted)
-    .map((chunk, index) => {
-      const start = formatSrtTime(chunk.timestamp[0]);
-      const end = formatSrtTime(chunk.timestamp[1]);
-      return `${index + 1}\n${start} --> ${end}\n${chunkBody(chunk)}\n`;
-    })
-    .join('\n');
-}
-
-export function chunksToVtt(chunks: SubtitleChunk[]): string {
-  const lines = ['WEBVTT', ''];
-  chunks
-    .filter((c) => !c.deleted)
-    .forEach((chunk, index) => {
-      lines.push(String(index + 1));
-      lines.push(`${formatVttTime(chunk.timestamp[0])} --> ${formatVttTime(chunk.timestamp[1])}`);
-      lines.push(chunkBody(chunk));
-      lines.push('');
-    });
-  return lines.join('\n');
-}
-
-export function chunksToJson(chunks: SubtitleChunk[]): string {
-  const kept = chunks
-    .filter((c) => !c.deleted)
-    .map((chunk) => ({
-      text: chunk.text,
-      secondText: chunk.secondText,
-      timestamp: chunk.timestamp,
-    }));
-  return JSON.stringify(kept, null, 2);
-}
-
-export interface AssExportOptions {
-  playResX: number;
-  playResY: number;
-  style: SubtitleStyle;
-  title?: string;
-}
-
-export function chunksToAss(chunks: SubtitleChunk[], options: AssExportOptions): string {
-  const { playResX, playResY, style, title = 'FlyCut Caption' } = options;
-  const fontName = getStyleFontFamily(style).replace(/"/g, '');
+/** 构建 ASS V4+ Style 行 */
+function buildAssStyleLine(
+  name: string,
+  style: SubtitleStyle,
+  playResY: number,
+  marginV: number,
+): string {
+  // ASS Style 行以逗号分隔字段，Fontname 不能含逗号；取 CSS font-family 首个 family，
+  // 去除引号与 fallback（如 "Noto Sans SC, sans-serif" → Noto Sans SC），否则字段错位导致 libass 样式失效。
+  const fontName = getStyleFontFamily(style).split(',')[0].replace(/"/g, '').trim();
   const fontSize = Math.round(playResY * style.fontSizeRatio);
-  const marginV = Math.round(playResY * style.bottomOffsetRatio);
   const primaryColour = hexToAssColor(style.color, style.colorOpacity);
   const outlineColour = hexToAssColor(style.borderColor, style.borderOpacity);
   const backColour = hexToAssColor(style.backgroundColor, style.backgroundOpacity);
@@ -102,6 +81,148 @@ export function chunksToAss(chunks: SubtitleChunk[], options: AssExportOptions):
   const underline = style.textDecoration === 'underline' ? -1 : 0;
   const outline = style.borderWidth;
   const shadow = style.shadowBlur > 0 ? 1 : 0;
+  // BorderStyle 3 = 不透明底框（使用 BackColour）；1 = 描边+阴影
+  const borderStyle = style.backgroundOpacity > 0 ? 3 : 1;
+  return `Style: ${name},${fontName},${fontSize},${primaryColour},&H000000FF,${outlineColour},${backColour},${bold},${italic},${underline},0,100,100,0,0,${borderStyle},${outline},${shadow},2,20,20,${marginV},1`;
+}
+
+export function chunksToSrt(chunks: SubtitleChunk[], exportMode: SubtitleDisplayMode = 'Bilingual'): string {
+  let index = 0;
+  return chunks
+    .filter((c) => !c.deleted)
+    .map((chunk) => {
+      const body = chunkBody(chunk, exportMode);
+      if (!body.trim()) return null;
+      index += 1;
+      const start = formatSrtTime(chunk.timestamp[0]);
+      const end = formatSrtTime(chunk.timestamp[1]);
+      return `${index}\n${start} --> ${end}\n${body}\n`;
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+export function chunksToVtt(chunks: SubtitleChunk[], exportMode: SubtitleDisplayMode = 'Bilingual'): string {
+  const lines = ['WEBVTT', ''];
+  let index = 0;
+  chunks
+    .filter((c) => !c.deleted)
+    .forEach((chunk) => {
+      const body = chunkBody(chunk, exportMode);
+      if (!body.trim()) return;
+      index += 1;
+      lines.push(String(index));
+      lines.push(`${formatVttTime(chunk.timestamp[0])} --> ${formatVttTime(chunk.timestamp[1])}`);
+      lines.push(body);
+      lines.push('');
+    });
+  return lines.join('\n');
+}
+
+export function chunksToJson(chunks: SubtitleChunk[], exportMode: SubtitleDisplayMode = 'Bilingual'): string {
+  const kept = chunks
+    .filter((c) => !c.deleted)
+    .map((chunk) => {
+      if (exportMode === 'Main') {
+        if (!chunk.text?.trim()) return null;
+        return { text: chunk.text, timestamp: chunk.timestamp };
+      }
+      if (exportMode === 'Second') {
+        if (!chunk.secondText?.trim()) return null;
+        return { text: chunk.secondText, timestamp: chunk.timestamp };
+      }
+      // Bilingual
+      if (!chunk.text?.trim() && !chunk.secondText?.trim()) return null;
+      return {
+        text: chunk.text,
+        secondText: chunk.secondText,
+        timestamp: chunk.timestamp,
+      };
+    })
+    .filter(Boolean);
+  return JSON.stringify(kept, null, 2);
+}
+
+export interface AssExportOptions {
+  playResX: number;
+  playResY: number;
+  stylePair: SubtitleStylePair;
+  exportMode?: SubtitleDisplayMode;
+  title?: string;
+  /** 软烧录（mov_text）：Bilingual 降级为单样式合并文本，避免重叠 Dialogue 导致时长被截断 */
+  softSubtitle?: boolean;
+}
+
+export function chunksToAss(chunks: SubtitleChunk[], options: AssExportOptions): string {
+  const { playResX, playResY, stylePair, exportMode = 'Bilingual', title = 'FlyCut Caption', softSubtitle = false } = options;
+  const primary = stylePair.primary;
+  const secondary = stylePair.secondary;
+  const primaryMarginV = Math.round(playResY * primary.bottomOffsetRatio);
+  const dialogueChunks = chunks.filter((c) => !c.deleted);
+
+  const styleLines: string[] = [];
+  const events: string[] = [];
+
+  if (exportMode === 'Second') {
+    // 单样式：副字幕样式，位置共享 primary 底边距
+    styleLines.push(buildAssStyleLine('Default', secondary, playResY, primaryMarginV));
+    for (const chunk of dialogueChunks) {
+      if (!chunk.secondText?.trim()) continue;
+      const start = formatAssTime(chunk.timestamp[0]);
+      const end = formatAssTime(chunk.timestamp[1]);
+      const text = chunk.secondText.replace(/\n/g, '\\N');
+      events.push(`Dialogue: 0,${start},${end},Default,,0,0,0,,${text}`);
+    }
+  } else if (exportMode === 'Main') {
+    styleLines.push(buildAssStyleLine('Default', primary, playResY, primaryMarginV));
+    for (const chunk of dialogueChunks) {
+      if (!chunk.text?.trim()) continue;
+      const start = formatAssTime(chunk.timestamp[0]);
+      const end = formatAssTime(chunk.timestamp[1]);
+      const text = chunk.text.replace(/\n/g, '\\N');
+      events.push(`Dialogue: 0,${start},${end},Default,,0,0,0,,${text}`);
+    }
+  } else if (softSubtitle) {
+    // 软烧录（mov_text）不支持重叠事件/双 layer：Bilingual 降级为单样式合并文本，
+    // 否则同时间的 Primary/Secondary 两条 Dialogue 会让 mov_text 把 Primary 截成 0 时长。
+    styleLines.push(buildAssStyleLine('Default', primary, playResY, primaryMarginV));
+    for (const chunk of dialogueChunks) {
+      if (!chunk.text?.trim()) continue;
+      const start = formatAssTime(chunk.timestamp[0]);
+      const end = formatAssTime(chunk.timestamp[1]);
+      const parts = [chunk.text.replace(/\n/g, '\\N')];
+      if (chunk.secondText?.trim()) {
+        parts.push(chunk.secondText.replace(/\n/g, '\\N'));
+      }
+      events.push(`Dialogue: 0,${start},${end},Default,,0,0,0,,${parts.join('\\N')}`);
+    }
+  } else {
+    // Bilingual 硬烧录：与预览一致（主字幕在上、副字幕在下），底边距由 primary 决定
+    const secondaryFontSize = Math.round(playResY * secondary.fontSizeRatio);
+    const primaryFontSize = Math.round(playResY * primary.fontSizeRatio);
+    const gap = Math.max(2, Math.round(primaryFontSize * 0.15));
+    // Alignment=2 时 MarginV 越大越靠上：副字幕贴底，主字幕叠在副字幕上方
+    const secondaryMarginV = primaryMarginV;
+    const primaryAboveMarginV =
+      secondaryMarginV + Math.round(secondaryFontSize * secondary.lineHeight) + gap;
+
+    styleLines.push(buildAssStyleLine('Secondary', secondary, playResY, secondaryMarginV));
+    styleLines.push(buildAssStyleLine('Primary', primary, playResY, primaryAboveMarginV));
+
+    for (const chunk of dialogueChunks) {
+      if (!chunk.text?.trim() && !chunk.secondText?.trim()) continue;
+      const start = formatAssTime(chunk.timestamp[0]);
+      const end = formatAssTime(chunk.timestamp[1]);
+      // Secondary（layer 0，底部）
+      if (chunk.secondText?.trim()) {
+        events.push(`Dialogue: 0,${start},${end},Secondary,,0,0,0,,${chunk.secondText.replace(/\n/g, '\\N')}`);
+      }
+      // Primary（layer 1，上方）
+      if (chunk.text?.trim()) {
+        events.push(`Dialogue: 1,${start},${end},Primary,,0,0,0,,${chunk.text.replace(/\n/g, '\\N')}`);
+      }
+    }
+  }
 
   const header = [
     '[Script Info]',
@@ -114,20 +235,11 @@ export function chunksToAss(chunks: SubtitleChunk[], options: AssExportOptions):
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    `Style: Default,${fontName},${fontSize},${primaryColour},&H000000FF,${outlineColour},${backColour},${bold},${italic},${underline},0,100,100,0,0,1,${outline},${shadow},2,20,20,${marginV},1`,
+    ...styleLines,
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ];
-
-  const events = chunks
-    .filter((c) => !c.deleted)
-    .map((chunk) => {
-      const start = formatAssTime(chunk.timestamp[0]);
-      const end = formatAssTime(chunk.timestamp[1]);
-      const text = chunkBody(chunk).replace(/\n/g, '\\N');
-      return `Dialogue: 0,${start},${end},Default,,0,0,0,,${text}`;
-    });
 
   return [...header, ...events].join('\n');
 }
@@ -151,6 +263,19 @@ export function getExportMimeType(format: SubtitleExportFormat): string {
 
 export interface SerializeExportOptions {
   ass?: AssExportOptions;
+  /** 导出内容模式：主/副/双语，默认 Bilingual */
+  exportMode?: SubtitleDisplayMode;
+}
+
+/** 去掉字幕文本标点，用于导出的字幕文件（不影响编辑器原文与 ASR 结果）。 */
+function stripChunksPunctuation(chunks: SubtitleChunk[]): SubtitleChunk[] {
+  return chunks.map((c) => ({
+    ...c,
+    text: stripSubtitleDisplayPunctuation(c.text ?? ''),
+    secondText: c.secondText
+      ? stripSubtitleDisplayPunctuation(c.secondText)
+      : c.secondText,
+  }));
 }
 
 export function serializeSubtitleExport(
@@ -158,21 +283,24 @@ export function serializeSubtitleExport(
   chunks: SubtitleChunk[],
   options?: SerializeExportOptions,
 ): string {
+  const exportMode = options?.exportMode ?? 'Bilingual';
+  const exportChunks = stripChunksPunctuation(chunks);
   switch (format) {
     case 'srt':
-      return chunksToSrt(chunks);
+      return chunksToSrt(exportChunks, exportMode);
     case 'vtt':
-      return chunksToVtt(chunks);
+      return chunksToVtt(exportChunks, exportMode);
     case 'json':
-      return chunksToJson(chunks);
+      return chunksToJson(exportChunks, exportMode);
     case 'ass':
-      return chunksToAss(chunks, options?.ass ?? {
+      return chunksToAss(exportChunks, options?.ass ?? {
         playResX: 1920,
         playResY: REFERENCE_VIDEO_HEIGHT,
-        style: defaultSubtitleStyle,
+        stylePair: defaultSubtitleStylePair,
+        exportMode,
       });
     default:
-      return chunksToSrt(chunks);
+      return chunksToSrt(exportChunks, exportMode);
   }
 }
 

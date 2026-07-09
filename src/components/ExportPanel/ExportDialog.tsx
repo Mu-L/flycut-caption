@@ -16,22 +16,27 @@ import {
   Video, 
   Settings,
   AlertCircle,
-  CheckCircle
+  CheckCircle,
+  Loader2,
 } from 'lucide-react';
 import { isTauriRuntime } from '@/utils/runtime';
+import { useTranslation } from '@/contexts/LocaleProvider';
+import type { SubtitleDisplayMode } from '@/subtitle';
 
 export interface VideoExportOptions {
   format: 'mp4' | 'webm';
   quality: 'high' | 'medium' | 'low';
   subtitleProcessing: 'none' | 'soft' | 'hard';
+  subtitleExportMode: SubtitleDisplayMode;
 }
 
 interface ExportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   exportType: 'subtitles' | 'video';
-  onExportSubtitles: (format: 'srt' | 'json' | 'vtt' | 'ass') => void;
+  onExportSubtitles: (format: 'srt' | 'json' | 'vtt' | 'ass', exportMode: SubtitleDisplayMode) => void | Promise<void>;
   onExportVideo: (options: VideoExportOptions) => void;
+  defaultExportMode?: SubtitleDisplayMode;
 }
 
 interface ExportEnvironment {
@@ -40,6 +45,8 @@ interface ExportEnvironment {
   ffmpegError?: string;
   ffmpegSource?: 'bundled' | 'system';
   ffmpegVersion?: string;
+  videoEncoderLabel?: string;
+  hardwareEncoding?: boolean;
   webHardBurn: boolean;
   tauriSoftBurn: boolean;
   tauriHardBurn: boolean;
@@ -50,13 +57,20 @@ export function ExportDialog({
   onOpenChange,
   exportType,
   onExportSubtitles,
-  onExportVideo
+  onExportVideo,
+  defaultExportMode,
 }: ExportDialogProps) {
+  const { t } = useTranslation();
+  const initialExportMode: SubtitleDisplayMode = defaultExportMode ?? 'Bilingual';
+  const [subtitleExportMode, setSubtitleExportMode] = useState<SubtitleDisplayMode>(initialExportMode);
   const [videoOptions, setVideoOptions] = useState<VideoExportOptions>({
     format: 'mp4',
     quality: 'medium',
     subtitleProcessing: 'none',
+    subtitleExportMode: initialExportMode,
   });
+
+  const [isExportingSubtitles, setIsExportingSubtitles] = useState(false);
 
   const [env, setEnv] = useState<ExportEnvironment>({
     isTauri: isTauriRuntime(),
@@ -90,6 +104,8 @@ export function ExportDialog({
           error?: string;
           source?: 'bundled' | 'system';
           version?: string;
+          videoEncoderLabel?: string;
+          hardwareEncoding?: boolean;
         }>('check_ffmpeg_environment');
         if (cancelled) return;
         setEnv({
@@ -98,6 +114,8 @@ export function ExportDialog({
           ffmpegError: status.error,
           ffmpegSource: status.source,
           ffmpegVersion: status.version,
+          videoEncoderLabel: status.videoEncoderLabel,
+          hardwareEncoding: status.hardwareEncoding,
           webHardBurn: false,
           tauriSoftBurn: status.available,
           tauriHardBurn: status.available,
@@ -124,14 +142,21 @@ export function ExportDialog({
   const hardBurnAvailable = env.isTauri ? env.tauriHardBurn : env.webHardBurn;
   const canExportVideo = env.isTauri ? env.ffmpegAvailable : true;
 
-  const handleSubtitleExport = (format: 'srt' | 'json' | 'vtt' | 'ass') => {
-    onExportSubtitles(format);
-    onOpenChange(false);
+  const handleSubtitleExport = async (format: 'srt' | 'json' | 'vtt' | 'ass') => {
+    if (isExportingSubtitles) return;
+
+    setIsExportingSubtitles(true);
+    try {
+      await onExportSubtitles(format, subtitleExportMode);
+      onOpenChange(false);
+    } finally {
+      setIsExportingSubtitles(false);
+    }
   };
 
   const handleVideoExport = () => {
     if (!canExportVideo) return;
-    onExportVideo(videoOptions);
+    onExportVideo({ ...videoOptions, subtitleExportMode });
     onOpenChange(false);
   };
 
@@ -161,6 +186,35 @@ export function ExportDialog({
     </button>
   );
 
+  const exportModeOptions: Array<{ id: SubtitleDisplayMode; label: string }> = [
+    { id: 'Bilingual', label: t('components.workstation.exportBilingual') },
+    { id: 'Main', label: t('components.workstation.exportMain') },
+    { id: 'Second', label: t('components.workstation.exportSecond') },
+  ];
+
+  const renderExportContentSelector = () => (
+    <div className="space-y-2">
+      <label className="text-sm font-medium">{t('components.workstation.exportContent')}</label>
+      <div className="grid grid-cols-3 gap-2">
+        {exportModeOptions.map((opt) => (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => setSubtitleExportMode(opt.id)}
+            className={cn(
+              'p-2 border rounded text-xs transition-colors',
+              subtitleExportMode === opt.id
+                ? 'border-primary bg-primary/10'
+                : 'hover:bg-muted/50'
+            )}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -188,10 +242,21 @@ export function ExportDialog({
         <div className="py-4">
           {exportType === 'subtitles' ? (
             <div className="space-y-4">
+              {renderExportContentSelector()}
+
+              {isExportingSubtitles && (
+                <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>{t('components.workstation.exportingSubtitles')}</span>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 gap-3">
                 <button
-                  onClick={() => handleSubtitleExport('srt')}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                  type="button"
+                  disabled={isExportingSubtitles}
+                  onClick={() => void handleSubtitleExport('srt')}
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <div className="flex items-center space-x-3">
                     <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center">
@@ -206,8 +271,10 @@ export function ExportDialog({
                 </button>
 
                 <button
-                  onClick={() => handleSubtitleExport('json')}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                  type="button"
+                  disabled={isExportingSubtitles}
+                  onClick={() => void handleSubtitleExport('json')}
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <div className="flex items-center space-x-3">
                     <div className="w-10 h-10 bg-green-100 dark:bg-green-900/30 rounded-lg flex items-center justify-center">
@@ -222,8 +289,10 @@ export function ExportDialog({
                 </button>
 
                 <button
-                  onClick={() => handleSubtitleExport('vtt')}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                  type="button"
+                  disabled={isExportingSubtitles}
+                  onClick={() => void handleSubtitleExport('vtt')}
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <div className="flex items-center space-x-3">
                     <div className="w-10 h-10 bg-purple-100 dark:bg-purple-900/30 rounded-lg flex items-center justify-center">
@@ -238,8 +307,10 @@ export function ExportDialog({
                 </button>
 
                 <button
-                  onClick={() => handleSubtitleExport('ass')}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                  type="button"
+                  disabled={isExportingSubtitles}
+                  onClick={() => void handleSubtitleExport('ass')}
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <div className="flex items-center space-x-3">
                     <div className="w-10 h-10 bg-orange-100 dark:bg-orange-900/30 rounded-lg flex items-center justify-center">
@@ -285,11 +356,15 @@ export function ExportDialog({
                     <div className="font-medium text-green-900 dark:text-green-100">
                       FFmpeg {env.ffmpegSource === 'bundled' ? '（内置）' : '（系统）'} 就绪
                     </div>
-                    {env.ffmpegVersion && (
-                      <div className="text-green-700 dark:text-green-300 mt-1 text-xs">
-                        {env.ffmpegVersion}
-                      </div>
-                    )}
+                    <div className="text-green-700 dark:text-green-300 mt-1 text-xs space-y-0.5">
+                      {env.ffmpegVersion && <div>{env.ffmpegVersion}</div>}
+                      {env.videoEncoderLabel && (
+                        <div>
+                          视频编码：{env.videoEncoderLabel}
+                          {env.hardwareEncoding ? '（硬件加速）' : '（软件）'}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -367,13 +442,41 @@ export function ExportDialog({
                 </div>
               </div>
 
+              {videoOptions.subtitleProcessing !== 'none' && (
+                <>
+                  {renderExportContentSelector()}
+                  {!env.isTauri
+                    && videoOptions.subtitleProcessing === 'hard'
+                    && subtitleExportMode === 'Bilingual' && (
+                    <div className="flex items-start space-x-2 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg text-sm">
+                      <AlertCircle className="w-4 h-4 text-orange-600 dark:text-orange-400 mt-0.5 flex-shrink-0" />
+                      <div className="text-orange-700 dark:text-orange-300">
+                        {t('components.workstation.webavBilingualHint')}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              <div className="flex items-start space-x-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm">
+                <CheckCircle className="w-4 h-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                <div>
+                  <div className="font-medium text-blue-900 dark:text-blue-100">保存位置</div>
+                  <div className="text-blue-700 dark:text-blue-300 mt-1">
+                    {env.isTauri
+                      ? '点击「开始导出」后会弹出系统保存对话框，视频将直接写入您选择的路径。处理进度会显示在时间轴区域。'
+                      : '点击「开始导出」后会弹出保存对话框（不支持时自动下载）。处理进度会显示在时间轴区域。'}
+                  </div>
+                </div>
+              </div>
+
               <div className="flex items-start space-x-2 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg text-sm">
                 <AlertCircle className="w-4 h-4 text-orange-600 dark:text-orange-400 mt-0.5 flex-shrink-0" />
                 <div>
                   <div className="font-medium text-orange-900 dark:text-orange-100">引擎说明</div>
                   <div className="text-orange-700 dark:text-orange-300 mt-1">
                     {env.isTauri
-                      ? '桌面端优先使用安装包内置 FFmpeg；软/硬烧录均通过 ASS 生成。'
+                      ? '桌面端优先使用安装包内置 FFmpeg；MP4 软字幕使用 QuickTime 文本轨，WebM 使用 WebVTT。'
                       : 'Web 端使用 WebAV 裁剪与画面烧录；软字幕轨道请使用桌面版。'}
                   </div>
                 </div>

@@ -177,10 +177,60 @@ async function getMediaDurationFromUrl(url: string, isVideo: boolean): Promise<n
   });
 }
 
+export type FetchProgressCallback = (loaded: number, total: number | null) => void;
+
+/**
+ * 拉取 URL 对应 Blob，可选上报下载进度（依赖 Content-Length）。
+ */
+export interface FetchBlobResult {
+  blob: Blob;
+  contentType: string | null;
+}
+
+export async function fetchBlobWithProgress(
+  url: string,
+  onProgress?: FetchProgressCallback,
+): Promise<FetchBlobResult> {
+  onProgress?.(0, null);
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() || null;
+  const contentLength = response.headers.get('content-length');
+  const total = contentLength ? Number.parseInt(contentLength, 10) : null;
+
+  if (!response.body || !onProgress) {
+    const blob = await response.blob();
+    onProgress?.(blob.size, total ?? blob.size);
+    return { blob, contentType: blob.type || contentType };
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let loaded = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.length;
+    onProgress(loaded, total);
+  }
+
+  const blob = new Blob(chunks, contentType ? { type: contentType } : undefined);
+  return { blob, contentType };
+}
+
 /**
  * 从远程 URL 加载视频或音频，返回可用于播放与 ASR 的 VideoFile。
  */
-export async function loadMediaFromUrl(urlString: string): Promise<VideoFile> {
+export async function loadMediaFromUrl(
+  urlString: string,
+  onProgress?: FetchProgressCallback,
+): Promise<VideoFile> {
   let parsedUrl: URL;
   try {
     parsedUrl = new URL(urlString.trim());
@@ -192,13 +242,8 @@ export async function loadMediaFromUrl(urlString: string): Promise<VideoFile> {
     throw new Error('Invalid URL protocol');
   }
 
-  const response = await fetch(parsedUrl.href);
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-
-  const blob = await response.blob();
-  const contentType = blob.type || response.headers.get('content-type')?.split(';')[0]?.trim() || '';
+  const { blob, contentType: fetchedContentType } = await fetchBlobWithProgress(parsedUrl.href, onProgress);
+  const contentType = blob.type || fetchedContentType || '';
   const fileName = decodeURIComponent(parsedUrl.pathname.split('/').pop() || 'media');
   const extension = getFileExtension(fileName);
   const type = contentType || MEDIA_MIME_BY_EXT[extension] || 'application/octet-stream';

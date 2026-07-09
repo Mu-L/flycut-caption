@@ -24,8 +24,10 @@ import { ASRLanguageSelector, ModelSelectItems, WebModelSelectItems } from '@/co
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ModelDownloadPanel } from '@/components/ASR/ModelDownloadPanel';
 import type { AvailableModel, AllModelsStatus } from '@/types/model';
-import { getWebAsrModel, WEB_ASR_MODELS } from '@/config/webAsrModels';
+import { getWebAsrModel } from '@/config/webAsrModels';
 import { getRuntimeAsrEngineType, isTauriRuntime } from '@/utils/runtime';
+import { WEB_MODELS_DOWNLOADED_EVENT } from '@/services/webModelCache';
+import { useActiveModelLanguageConfig } from '@/hooks/useActiveModelLanguageConfig';
 
 interface ASRPanelProps {
   className?: string;
@@ -68,6 +70,8 @@ export function ASRPanel({ className }: ASRPanelProps) {
   const [isTauri, setIsTauri] = useState(false);
   const [allModels, setAllModels] = useState<AvailableModel[]>([]);
   const [downloadedModels, setDownloadedModels] = useState<string[]>([]);
+  const [downloadedWebModels, setDownloadedWebModels] = useState<string[]>([]);
+  const languageConfig = useActiveModelLanguageConfig();
 
   useEffect(() => {
     const tauri = isTauriRuntime();
@@ -76,6 +80,23 @@ export function ASRPanel({ className }: ASRPanelProps) {
     setASREngineType(expectedEngine);
     asrService.setEngineType(expectedEngine);
   }, [setASREngineType]);
+
+  // 浏览器：检查已下载 Web 模型
+  useEffect(() => {
+    if (isTauri) return;
+    const refresh = () => {
+      asrService.checkAllWebModelsDownloaded()
+        .then(setDownloadedWebModels)
+        .catch((err) => console.error('Failed to check web models:', err));
+    };
+    refresh();
+    window.addEventListener(WEB_MODELS_DOWNLOADED_EVENT, refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.removeEventListener(WEB_MODELS_DOWNLOADED_EVENT, refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [isTauri]);
 
   // Tauri：加载 manifest 模型 + 已下载状态；窗口聚焦时刷新
   useEffect(() => {
@@ -137,11 +158,7 @@ export function ASRPanel({ className }: ASRPanelProps) {
       }
     };
 
-    asrService.setProgressCallback(handleProgress);
-
-    return () => {
-      asrService.setProgressCallback(() => {});
-    };
+    return asrService.addProgressCallback(handleProgress);
   }, [setASRProgress, setTranscript, setError, setStage, showSuccess, showError, showInfo, showWarning]);
 
   // 设置设备类型
@@ -234,6 +251,7 @@ export function ASRPanel({ className }: ASRPanelProps) {
 
   const changeWebModel = useCallback((modelId: string) => {
     setWebModelId(modelId);
+    asrService.setWebModel(modelId);
     const meta = getWebAsrModel(modelId);
     showInfo('模型切换成功', `已切换到 ${meta?.name || modelId}`);
   }, [setWebModelId, showInfo]);
@@ -352,6 +370,7 @@ export function ASRPanel({ className }: ASRPanelProps) {
                 language={language}
                 onLanguageChange={handleLanguageChange}
                 disabled={isLoading}
+                mode={languageConfig.mode}
                 placeholder="搜索支持的语音识别语言..."
               />
             </div>
@@ -383,15 +402,25 @@ export function ASRPanel({ className }: ASRPanelProps) {
                     <span>浏览器识别模型</span>
                   </label>
                   <Select
-                    value={getWebAsrModel(webModelId) ? webModelId : WEB_ASR_MODELS[0]?.id}
+                    value={
+                      downloadedWebModels.includes(webModelId)
+                        ? webModelId
+                        : (downloadedWebModels[0] ?? webModelId)
+                    }
                     onValueChange={(v) => changeWebModel(v)}
-                    disabled={isLoading}
+                    disabled={isLoading || downloadedWebModels.length === 0}
                   >
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <WebModelSelectItems />
+                      {downloadedWebModels.length > 0 ? (
+                        <WebModelSelectItems downloadedModelIds={downloadedWebModels} />
+                      ) : (
+                        <SelectItem value={webModelId} disabled>
+                          未下载模型，请到下方下载
+                        </SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -483,6 +512,7 @@ export function ASRPanel({ className }: ASRPanelProps) {
             language={language}
             onLanguageChange={handleLanguageChange}
             disabled={isLoading}
+            mode={languageConfig.mode}
           />
         </div>
       )}

@@ -27,7 +27,7 @@ export interface SubtitleTranscript {
 }
 
 export interface ASRProgress {
-  status: 'loading' | 'initiate' | 'progress' | 'done' | 'ready' | 'loaded' | 'running' | 'complete' | 'error' | 'reset';
+  status: 'loading' | 'initiate' | 'progress' | 'done' | 'ready' | 'downloaded' | 'loaded' | 'running' | 'complete' | 'error' | 'reset';
   data?: string;
   file?: string;
   progress?: number;

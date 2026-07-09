@@ -28,14 +28,28 @@ export function shouldAdvertiseWordLevelDelete(
   return modelClaimsWordTimestamps(modelTimestamp);
 }
 
-/** 视频裁剪粒度：有字词时间戳时优先字词级，否则句子级 */
+/** 视频裁剪粒度：有字词时间戳时优先字词级，并合并空白占位段 */
 export function resolveCuttingChunks(
   chunks: SubtitleChunk[],
   wordChunks: SubtitleChunk[] | undefined,
   hasWordTimestamps: boolean,
 ): SubtitleChunk[] {
   if (canDeleteByWordAtRuntime({ hasWordTimestamps, wordChunks }) && wordChunks?.length) {
-    return wordChunks;
+    // 句子级删除时，所属字词即使未单独标记 deleted 也视为删除（防御历史数据不同步）
+    const deletedSentenceIds = new Set(
+      chunks
+        .filter((chunk) => !chunk.isBlankSpacer && chunk.deleted)
+        .map((chunk) => chunk.id),
+    );
+    const effectiveWords = wordChunks.map((word) => {
+      if (word.deleted) return word;
+      if (word.sentenceId && deletedSentenceIds.has(word.sentenceId)) {
+        return { ...word, deleted: true };
+      }
+      return word;
+    });
+    const blankSpacers = chunks.filter((chunk) => chunk.isBlankSpacer);
+    return [...effectiveWords, ...blankSpacers].sort((a, b) => a.timestamp[0] - b.timestamp[0]);
   }
   return chunks;
 }

@@ -7,6 +7,12 @@ import {
   type TransformersASREngineConfig,
 } from './asrEngines/TransformersASREngine';
 import { FunASRTauriEngine } from './asrEngines/FunASRTauriEngine';
+import {
+  checkAllWebModelsDownloaded,
+  isWebModelDownloaded,
+  markWebModelDownloaded,
+} from './webModelCache';
+import { resolveFunasrModelId } from '@/utils/asrModelId';
 
 export type ASREngineType = 'transformers' | 'funasr-tauri';
 
@@ -57,11 +63,23 @@ export class ASRService {
   }
 
   /**
-   * 设置进度回调
+   * 设置进度回调（会替换已有主回调）
    */
   public setProgressCallback(callback: (progress: ASRProgress) => void) {
     this.transformersEngine.setProgressCallback(callback);
     this.funasrTauriEngine.setProgressCallback(callback);
+  }
+
+  /**
+   * 追加进度回调（不覆盖其他监听方，如下载面板与 ASR 主流程可并存）
+   */
+  public addProgressCallback(callback: (progress: ASRProgress) => void): () => void {
+    const offTransformers = this.transformersEngine.addProgressCallback(callback);
+    const offFunasr = this.funasrTauriEngine.addProgressCallback(callback);
+    return () => {
+      offTransformers();
+      offFunasr();
+    };
   }
 
   public configure(config: Partial<TransformersASREngineConfig>) {
@@ -105,7 +123,8 @@ export class ASRService {
   public async loadModel(modelId?: string): Promise<void> {
     console.log('ASR开始加载模型:', this.currentEngineType, this.currentDevice, modelId);
     if (this.currentEngineType === 'funasr-tauri') {
-      await this.funasrTauriEngine.loadModel(modelId);
+      const funasrModelId = resolveFunasrModelId(modelId);
+      await this.funasrTauriEngine.loadModel(funasrModelId);
     } else {
       if (modelId) {
         this.transformersEngine.setWebModel(modelId);
@@ -190,7 +209,11 @@ export class ASRService {
       throw new Error('transcribeWithPath 仅在 funasr-tauri 引擎下可用');
     }
 
-    return this.funasrTauriEngine.transcribe({ path: inputPath }, language, modelId);
+    return this.funasrTauriEngine.transcribe(
+      { path: inputPath },
+      language,
+      resolveFunasrModelId(modelId),
+    );
   }
 
   /**
@@ -220,34 +243,49 @@ export class ASRService {
   }
 
   /**
-   * 检查指定 Web 模型是否已加载（当前会话）
+   * 检查指定 Web 模型是否已下载到浏览器缓存
    */
-  public isWebModelReady(webModelId: string): boolean {
-    if (!this.transformersEngine.isReady()) return false;
+  public async isWebModelDownloaded(webModelId: string): Promise<boolean> {
+    return isWebModelDownloaded(webModelId);
+  }
+
+  /**
+   * 返回所有已下载的 Web 模型短 id
+   */
+  public async checkAllWebModelsDownloaded(): Promise<string[]> {
+    return checkAllWebModelsDownloaded();
+  }
+
+  /**
+   * 下载 Web 模型到浏览器缓存（不加载到内存，不触发识别）
+   */
+  public async downloadWebModel(webModelId: string, device?: ASRDevice): Promise<void> {
     const meta = WEB_ASR_MODEL_LOOKUP[webModelId];
-    if (!meta) return false;
-    return this.transformersEngine.getConfig().modelId === meta.modelId;
+    if (!meta) {
+      throw new Error(`未知的 Web ASR 模型: ${webModelId}`);
+    }
+    const fullMeta = getWebAsrModel(webModelId);
+    if (!fullMeta) {
+      throw new Error(`未知的 Web ASR 模型: ${webModelId}`);
+    }
+
+    const config: TransformersASREngineConfig = {
+      modelId: fullMeta.modelId,
+      modelBaseUrl: fullMeta.modelBaseUrl,
+      family: fullMeta.family,
+      device: device ?? this.transformersEngine.getConfig().device,
+      language: 'en',
+    };
+
+    await this.transformersEngine.downloadModelWithConfig(config);
+    markWebModelDownloaded(webModelId);
   }
 
   /**
-   * 预下载（预加载）Web 模型。modelId 为 Web 短 id 或 HF modelId。
-   * 不影响当前引擎选择，进度通过 progressCallback 返回。
+   * 为 Web 模型预下载追加进度回调（不覆盖 ASR 主流程回调）
    */
-  public async preloadWebModel(webModelId?: string, device?: ASRDevice): Promise<void> {
-    if (webModelId) {
-      this.transformersEngine.setWebModel(webModelId);
-    }
-    if (device) {
-      this.transformersEngine.setConfig({ device });
-    }
-    await this.transformersEngine.loadModel();
-  }
-
-  /**
-   * 为 Web 模型预下载设置进度回调
-   */
-  public setWhisperProgressCallback(callback: (progress: ASRProgress) => void) {
-    this.transformersEngine.setProgressCallback(callback);
+  public addWhisperProgressCallback(callback: (progress: ASRProgress) => void): () => void {
+    return this.addProgressCallback(callback);
   }
 
   /**
@@ -261,7 +299,7 @@ export class ASRService {
 }
 
 // 内部：Web 短 id → 模型元信息，避免 service 层循环依赖
-import { WEB_ASR_MODELS } from '@/config/webAsrModels';
+import { getWebAsrModel, WEB_ASR_MODELS } from '@/config/webAsrModels';
 const WEB_ASR_MODEL_LOOKUP: Record<string, { modelId: string }> = Object.fromEntries(
   WEB_ASR_MODELS.map((m) => [m.id, { modelId: m.modelId }]),
 );

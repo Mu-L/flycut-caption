@@ -1,7 +1,8 @@
 // 视频处理引擎类型定义
 
 import type { VideoFile, VideoSegment, VideoProcessingProgress } from './video';
-import type { SubtitleStyle } from '@/components/SubtitleSettings';
+import type { SubtitleChunk } from '@/types/subtitle';
+import type { SubtitleStyle, SubtitleStylePair, SubtitleDisplayMode } from '@/subtitle';
 
 // 支持的视频处理引擎类型
 export type VideoEngineType = 'webav' | 'ffmpeg' | 'ffmpeg-tauri' | 'webcodecs';
@@ -16,10 +17,16 @@ export interface VideoProcessingOptions {
   quality: 'high' | 'medium' | 'low';
   preserveAudio: boolean;
   subtitleProcessing?: SubtitleProcessingType; // 字幕处理类型：无字幕、软烧录、硬烧录
-  subtitleStyle?: SubtitleStyle; // 字幕样式配置
+  subtitleStyle?: SubtitleStyle; // 字幕样式配置（向后兼容，引擎优先用 subtitleStylePair）
+  subtitleStylePair?: SubtitleStylePair; // 主/副字幕样式对
+  subtitleExportMode?: SubtitleDisplayMode; // 导出内容：主/副/双语
   engine?: VideoEngineType; // 指定使用的引擎
   videoWidth?: number;
   videoHeight?: number;
+  /** Tauri：用户指定的输出绝对路径，FFmpeg 直接写入 */
+  outputPath?: string;
+  /** 字幕烧录/嵌入用的时间轴（无裁剪时可与 segments 分离） */
+  subtitleChunks?: SubtitleChunk[];
 }
 
 // 引擎能力检测结果

@@ -2,13 +2,18 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { useChunks } from '@/stores/historyStore';
-import type { SubtitleStyle } from '@/subtitle';
+import type { SubtitleStyle, SubtitleDisplayMode } from '@/subtitle';
 import { resolveBottomOffset, scaleVideoMetric, renderSubtitleFrame } from '@/subtitle';
 
 interface SubtitleOverlayProps {
   currentTime: number;
-  style: SubtitleStyle;
-  onStyleChange: (style: SubtitleStyle) => void;
+  primaryStyle: SubtitleStyle;
+  /** 副字幕样式（缺省时回退到 primaryStyle） */
+  secondaryStyle?: SubtitleStyle;
+  /** 显示模式：默认 Bilingual */
+  displayMode?: SubtitleDisplayMode;
+  /** 拖拽调整底边距，回写主字幕样式（位置共享 primary） */
+  onPrimaryStyleChange: (style: SubtitleStyle) => void;
   containerDimensions: { width: number; height: number };
   videoDimensions: { width: number; height: number };
   /** 预览模式下删除片段区间应隐藏字幕 */
@@ -18,8 +23,10 @@ interface SubtitleOverlayProps {
 
 export function SubtitleOverlay({
   currentTime,
-  style,
-  onStyleChange,
+  primaryStyle,
+  secondaryStyle,
+  displayMode = 'Bilingual',
+  onPrimaryStyleChange,
   containerDimensions,
   videoDimensions,
   visible = true,
@@ -34,16 +41,19 @@ export function SubtitleOverlay({
 
   const canvasSize = containerDimensions;
 
+  // 'Second' 模式按副字幕内容匹配；其余按主字幕内容匹配
   const currentSubtitle = useMemo(() => {
     if (!chunks || chunks.length === 0) return null;
+
+    const matchField = displayMode === 'Second' ? 'secondText' : 'text';
 
     return chunks.find(chunk =>
       !chunk.deleted &&
       currentTime >= chunk.timestamp[0] &&
       currentTime <= chunk.timestamp[1] &&
-      chunk.text && chunk.text.trim() !== ''
+      chunk[matchField] && chunk[matchField]!.trim() !== ''
     ) || null;
-  }, [chunks, currentTime]);
+  }, [chunks, currentTime, displayMode]);
 
   const { scaleFactor, actualVideoSize, videoHeight, videoWidth } = useMemo(() => {
     if (!videoDimensions.width || !videoDimensions.height || !containerDimensions.width || !containerDimensions.height) {
@@ -84,7 +94,9 @@ export function SubtitleOverlay({
 
     await renderSubtitleFrame({
       canvas,
-      style,
+      primaryStyle,
+      secondaryStyle,
+      displayMode,
       content: {
         primaryText: currentSubtitle.text,
         secondText: currentSubtitle.secondText,
@@ -94,7 +106,7 @@ export function SubtitleOverlay({
       videoDisplayWidth: actualVideoSize.width,
       videoDisplayHeight: actualVideoSize.height,
     });
-  }, [currentSubtitle, style, videoHeight, videoWidth, actualVideoSize, visible]);
+  }, [currentSubtitle, primaryStyle, secondaryStyle, displayMode, videoHeight, videoWidth, actualVideoSize, visible]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -110,11 +122,11 @@ export function SubtitleOverlay({
     e.preventDefault();
     setIsDragging(true);
     setDragStartY(e.clientY);
-    setDragStartOffsetRatio(style.bottomOffsetRatio);
+    setDragStartOffsetRatio(primaryStyle.bottomOffsetRatio);
 
     document.body.style.cursor = 'ns-resize';
     document.body.style.userSelect = 'none';
-  }, [style.bottomOffsetRatio]);
+  }, [primaryStyle.bottomOffsetRatio]);
 
   const handleDragMove = useCallback((e: MouseEvent) => {
     if (!isDragging || !videoHeight) return;
@@ -128,8 +140,8 @@ export function SubtitleOverlay({
     const maxRatio = (containerDimensions.height * 0.8) / scaleFactor / videoHeight;
     newRatio = Math.max(minRatio, Math.min(maxRatio, newRatio));
 
-    onStyleChange({ ...style, bottomOffsetRatio: newRatio });
-  }, [isDragging, dragStartY, dragStartOffsetRatio, style, onStyleChange, scaleFactor, containerDimensions.height, videoHeight]);
+    onPrimaryStyleChange({ ...primaryStyle, bottomOffsetRatio: newRatio });
+  }, [isDragging, dragStartY, dragStartOffsetRatio, primaryStyle, onPrimaryStyleChange, scaleFactor, containerDimensions.height, videoHeight]);
 
   const handleDragEnd = useCallback(() => {
     if (!isDragging) return;
@@ -151,12 +163,12 @@ export function SubtitleOverlay({
     }
   }, [isDragging, handleDragMove, handleDragEnd]);
 
-  if (!style.visible) {
+  if (!primaryStyle.visible) {
     return null;
   }
 
   const bottomOffsetDisplay = scaleVideoMetric(
-    resolveBottomOffset(style, videoHeight),
+    resolveBottomOffset(primaryStyle, videoHeight),
     actualVideoSize.height || videoHeight,
     videoHeight,
   );

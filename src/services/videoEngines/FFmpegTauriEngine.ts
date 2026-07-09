@@ -9,7 +9,7 @@ import type {
 } from '@/types/videoEngine';
 import type { VideoFile, VideoSegment, VideoProcessingProgress } from '@/types/video';
 import type { SubtitleChunk } from '@/types/subtitle';
-import { buildBurnAssContent } from '@/subtitle/burnAss';
+import { buildBurnAssContent, buildBurnTextSubtitleContent } from '@/subtitle/burnAss';
 
 interface ProcessVideoResult {
   outputPath: string;
@@ -95,6 +95,12 @@ export class FFmpegTauriEngine implements IVideoProcessingEngine {
 
     this.unlisten = await listen<ProgressPayload>('video-process-progress', (event) => {
       const payload = event.payload;
+      console.log(
+        '[flycut-export][progress]',
+        `stage=${payload.stage ?? '?'}`,
+        `progress=${payload.progress ?? 0}`,
+        payload.message ?? '',
+      );
       this.reportProgress(
         this.mapStage(payload.stage),
         payload.progress ?? 0,
@@ -112,10 +118,24 @@ export class FFmpegTauriEngine implements IVideoProcessingEngine {
 
     const outputFormat = options.format ?? options.outputFormat ?? 'mp4';
     const subtitleProcessing = options.subtitleProcessing ?? 'none';
+    const keptCount = segments.filter((s) => s.keep).length;
+    const deletedCount = segments.filter((s) => !s.keep).length;
+    console.log('[flycut-export][start]', {
+      inputPath: this.videoFile.path,
+      outputFormat,
+      quality: options.quality,
+      subtitleProcessing,
+      segments: segments.length,
+      kept: keptCount,
+      deleted: deletedCount,
+      outputPath: options.outputPath ?? null,
+      hasAssStyle: Boolean(options.subtitleStylePair || options.subtitleStyle),
+    });
 
     let assContent: string | undefined;
-    if (subtitleProcessing !== 'none' && options.subtitleStyle) {
-      const chunks: SubtitleChunk[] = segments
+    let subtitleTextContent: string | undefined;
+    if (subtitleProcessing !== 'none' && (options.subtitleStylePair || options.subtitleStyle)) {
+      const chunks: SubtitleChunk[] = (options.subtitleChunks ?? segments
         .filter((seg) => seg.keep && seg.text)
         .map((seg) => ({
           id: seg.id ?? `${seg.start}-${seg.end}`,
@@ -123,46 +143,83 @@ export class FFmpegTauriEngine implements IVideoProcessingEngine {
           secondText: seg.secondText,
           timestamp: [seg.start, seg.end] as [number, number],
           deleted: false,
-        }));
+        })));
 
       if (chunks.length > 0) {
+        const stylePair = options.subtitleStylePair
+          ?? { primary: options.subtitleStyle!, secondary: options.subtitleStyle! };
+        const exportMode = options.subtitleExportMode ?? 'Bilingual';
         assContent = buildBurnAssContent({
           chunks,
           keptSegments: segments,
-          style: options.subtitleStyle,
+          stylePair,
+          exportMode,
+          softSubtitle: subtitleProcessing === 'soft',
           playResX: options.videoWidth ?? this.videoWidth,
           playResY: options.videoHeight ?? this.videoHeight,
+        });
+        if (subtitleProcessing === 'soft') {
+          subtitleTextContent = buildBurnTextSubtitleContent({
+            chunks,
+            keptSegments: segments,
+            exportMode,
+          });
+        }
+        console.log('[flycut-export][subtitle]', {
+          chunks: chunks.length,
+          assBytes: assContent?.length ?? 0,
+          softTextBytes: subtitleTextContent?.length ?? 0,
+          exportMode,
         });
       }
     }
 
-    this.reportProgress('cutting', 5, '调用 FFmpeg 处理...');
+    const needsCutting = segments.some((seg) => !seg.keep);
+    this.reportProgress(
+      needsCutting ? 'cutting' : 'analyzing',
+      5,
+      needsCutting ? '调用 FFmpeg 裁剪...' : '调用 FFmpeg 处理...',
+    );
 
-    const result = await invoke<ProcessVideoResult>('process_video_with_ffmpeg', {
-      options: {
-        inputPath: this.videoFile.path,
-        segments: segments.map((seg) => ({
-          start: seg.start,
-          end: seg.end,
-          keep: seg.keep,
-        })),
-        outputFormat,
-        quality: options.quality,
-        preserveAudio: options.preserveAudio,
-        subtitleProcessing,
-        assContent: assContent ?? null,
-      },
-    });
+    try {
+      const result = await invoke<ProcessVideoResult>('process_video_with_ffmpeg', {
+        options: {
+          inputPath: this.videoFile.path,
+          segments: segments.map((seg) => ({
+            start: seg.start,
+            end: seg.end,
+            keep: seg.keep,
+          })),
+          outputFormat,
+          quality: options.quality,
+          preserveAudio: options.preserveAudio,
+          subtitleProcessing,
+          assContent: assContent ?? null,
+          subtitleTextContent: subtitleTextContent ?? null,
+          outputPath: options.outputPath ?? null,
+        },
+      });
+      console.log('[flycut-export][done]', result);
 
-    const assetUrl = convertFileSrc(result.outputPath);
-    const response = await fetch(assetUrl);
-    if (!response.ok) {
-      throw new Error(`读取输出视频失败: ${response.status}`);
+      if (options.outputPath) {
+        this.reportProgress('complete', 100, '导出完成');
+        return new Blob([], { type: outputFormat === 'webm' ? 'video/webm' : 'video/mp4' });
+      }
+
+      const assetUrl = convertFileSrc(result.outputPath);
+      const response = await fetch(assetUrl);
+      if (!response.ok) {
+        throw new Error(`读取输出视频失败: ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      console.log('[flycut-export][blob]', { size: blob.size, type: blob.type });
+      this.reportProgress('complete', 100, '导出完成');
+      return blob;
+    } catch (error) {
+      console.error('[flycut-export][error]', error);
+      throw error;
     }
-
-    const blob = await response.blob();
-    this.reportProgress('complete', 100, '导出完成');
-    return blob;
   }
 
   async cleanup(): Promise<void> {

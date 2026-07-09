@@ -12,6 +12,10 @@ export class UnifiedVideoProcessor {
     this.onProgress = onProgress;
   }
 
+  setProgressCallback(onProgress?: (progress: VideoProcessingProgress) => void): void {
+    this.onProgress = onProgress;
+  }
+
   /**
    * 初始化视频处理器
    * @param videoFile 视频文件

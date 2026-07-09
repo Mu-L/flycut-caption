@@ -291,6 +291,7 @@ const customJaJP: FlyCutCaptionLocale = {
       unsupportedAudioFormat: 'サポートされていない音声形式',
       insufficientMemory: 'メモリ不足',
       networkTimeout: 'ネットワークタイムアウト',
+      loadSampleFailed: 'サンプル動画の読み込みに失敗しました',
     },
     export: {
       exportStarted: 'エクスポート開始',
@@ -316,6 +317,8 @@ const customJaJP: FlyCutCaptionLocale = {
       invalidTimeRange: '無効な時間範囲',
       overlappingSubtitles: '字幕の時間が重複しています',
       emptySubtitleText: '字幕テキストが空です',
+      exportFailed: '字幕のエクスポートに失敗しました',
+      originalConfirmFailed: '原言語字幕の適用に失敗しました',
       maxSubtitlesReached: '最大字幕数に達しました',
       undoLimit: '元に戻す制限に達しました',
       redoLimit: 'やり直し制限に達しました',

@@ -1,5 +1,7 @@
 export {
   defaultSubtitleStyle,
+  defaultSecondarySubtitleStyle,
+  defaultSubtitleStylePair,
   migrateSubtitleStyle,
   fontSizeAtReference,
   bottomOffsetAtReference,
@@ -11,7 +13,7 @@ export {
   DEFAULT_FONT_SIZE_RATIO,
   DEFAULT_BOTTOM_OFFSET_RATIO,
 } from './subtitleStyle';
-export type { SubtitleStyle } from './subtitleStyle';
+export type { SubtitleStyle, SubtitleStylePair } from './subtitleStyle';
 
 export {
   resolveVideoFontSize,
@@ -30,11 +32,12 @@ export {
 } from './subtitleLayout';
 
 export { renderSubtitleFrame } from './subtitleRenderer';
-export type { SubtitleRenderContent, SubtitleRenderFrame } from './subtitleRenderer';
+export type { SubtitleRenderContent, SubtitleRenderFrame, SubtitleDisplayMode } from './subtitleRenderer';
 
 export {
   ASPECT_PRESETS,
   STYLE_PRESETS,
+  DEFAULT_STYLE_PRESET_ID,
   applyAspectPreset,
   applyStylePreset,
   matchActiveStylePreset,

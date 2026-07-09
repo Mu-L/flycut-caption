@@ -1,10 +1,10 @@
 import type { SubtitleStyle } from './subtitleStyle';
-import { DEFAULT_BOTTOM_OFFSET_RATIO, defaultSubtitleStyle } from './subtitleStyle';
+import { DEFAULT_BOTTOM_OFFSET_RATIO } from './subtitleStyle';
 
 export type AspectPreset = 'landscape' | 'portrait_9_16' | 'square_1_1';
 export type StylePresetId =
-  | 'none'
   | 'white-black'
+  | 'none'
   | 'white-outline'
   | 'yellow-black'
   | 'red-white'
@@ -17,13 +17,13 @@ export type StylePresetId =
   | 'brown-white'
   | 'cream-brown'
   | 'rose-white'
-  | 'black-white'
-  | 'white-plain'
-  | 'yellow-plain'
-  | 'red-plain'
-  | 'green-plain'
-  | 'blue-white'
-  | 'pink-plain'
+  | 'black-bg'
+  | 'white-bg'
+  | 'yellow-bg'
+  | 'red-bg'
+  | 'green-bg'
+  | 'blue-bg'
+  | 'pink-bg'
   | 'peach-plain'
   | 'orange-red'
   | 'green-black';
@@ -63,7 +63,9 @@ export const ASPECT_PRESETS: AspectPresetConfig[] = [
   },
 ];
 
+/** 预设公共基线：切换预设时重置背景/阴影/字重，避免残留上一套样式 */
 const BASE_TEXT_PRESET: Partial<SubtitleStyle> = {
+  backgroundColor: '#000000',
   backgroundOpacity: 0,
   shadowBlur: 0,
   shadowOffsetX: 0,
@@ -71,8 +73,14 @@ const BASE_TEXT_PRESET: Partial<SubtitleStyle> = {
   fontWeight: 'bold',
   fontStyle: 'normal',
   textDecoration: 'none',
+  borderOpacity: 1,
+  colorOpacity: 1,
 };
 
+/**
+ * 样式预设列表。
+ * 第一个（white-black / 白字黑边）即默认样式，与 defaultSubtitleStyle 保持一致。
+ */
 export const STYLE_PRESETS: Array<{
   id: StylePresetId;
   label: string;
@@ -80,22 +88,22 @@ export const STYLE_PRESETS: Array<{
   preview: StylePresetPreview;
 }> = [
   {
-    id: 'none',
-    label: '无样式',
-    patch: {
-      ...BASE_TEXT_PRESET,
-      color: defaultSubtitleStyle.color,
-      borderColor: defaultSubtitleStyle.borderColor,
-      borderWidth: 0,
-      fontWeight: 'normal',
-    },
-    preview: { textColor: '#8d9095', showNone: true },
-  },
-  {
     id: 'white-black',
     label: '白字黑边',
     patch: { ...BASE_TEXT_PRESET, color: '#FFFFFF', borderColor: '#000000', borderWidth: 2 },
     preview: { textColor: '#FFFFFF', borderColor: '#000000' },
+  },
+  {
+    id: 'none',
+    label: '无样式',
+    patch: {
+      ...BASE_TEXT_PRESET,
+      color: '#FFFFFF',
+      borderColor: '#000000',
+      borderWidth: 0,
+      fontWeight: 'normal',
+    },
+    preview: { textColor: '#8d9095', showNone: true },
   },
   {
     id: 'white-outline',
@@ -169,67 +177,113 @@ export const STYLE_PRESETS: Array<{
     patch: { ...BASE_TEXT_PRESET, color: '#E65E69', borderColor: '#FFFFFF', borderWidth: 2 },
     preview: { textColor: '#E65E69', borderColor: '#FFFFFF' },
   },
+  // 带背景色的实心底框预设
   {
-    id: 'black-white',
-    label: '黑字白边',
-    patch: { ...BASE_TEXT_PRESET, color: '#000000', borderColor: '#FFFFFF', borderWidth: 2 },
+    id: 'black-bg',
+    label: '白字黑底',
+    patch: {
+      ...BASE_TEXT_PRESET,
+      color: '#FFFFFF',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0.85,
+      borderWidth: 0,
+    },
     preview: { textColor: '#FFFFFF', backgroundColor: '#000000' },
   },
   {
-    id: 'white-plain',
-    label: '纯白字',
-    patch: { ...BASE_TEXT_PRESET, color: '#FFFFFF', borderColor: '#000000', borderWidth: 0 },
+    id: 'white-bg',
+    label: '黑字白底',
+    patch: {
+      ...BASE_TEXT_PRESET,
+      color: '#000000',
+      backgroundColor: '#FFFFFF',
+      backgroundOpacity: 0.95,
+      borderWidth: 0,
+    },
     preview: { textColor: '#000000', backgroundColor: '#FFFFFF' },
   },
   {
-    id: 'yellow-plain',
-    label: '纯黄字',
-    patch: { ...BASE_TEXT_PRESET, color: '#FFE100', borderColor: '#000000', borderWidth: 0 },
+    id: 'yellow-bg',
+    label: '黑字黄底',
+    patch: {
+      ...BASE_TEXT_PRESET,
+      color: '#000000',
+      backgroundColor: '#FFE100',
+      backgroundOpacity: 0.95,
+      borderWidth: 0,
+    },
     preview: { textColor: '#000000', backgroundColor: '#FFE100' },
   },
   {
-    id: 'red-plain',
+    id: 'red-bg',
     label: '红底白字',
-    patch: { ...BASE_TEXT_PRESET, color: '#FFFFFF', backgroundColor: '#B8505C', backgroundOpacity: 0.85, borderWidth: 0 },
+    patch: {
+      ...BASE_TEXT_PRESET,
+      color: '#FFFFFF',
+      backgroundColor: '#B8505C',
+      backgroundOpacity: 0.9,
+      borderWidth: 0,
+    },
     preview: { textColor: '#FFFFFF', backgroundColor: '#B8505C' },
   },
   {
-    id: 'green-plain',
-    label: '绿字黑边',
-    patch: { ...BASE_TEXT_PRESET, color: '#62F69C', borderColor: '#000000', borderWidth: 2 },
+    id: 'green-bg',
+    label: '绿字黑底',
+    patch: {
+      ...BASE_TEXT_PRESET,
+      color: '#62F69C',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0.85,
+      borderWidth: 0,
+    },
     preview: { textColor: '#62F69C', backgroundColor: '#000000' },
   },
   {
-    id: 'blue-white',
-    label: '蓝字白边',
-    patch: { ...BASE_TEXT_PRESET, color: '#4A92D9', borderColor: '#FFFFFF', borderWidth: 2 },
+    id: 'blue-bg',
+    label: '白字蓝底',
+    patch: {
+      ...BASE_TEXT_PRESET,
+      color: '#FFFFFF',
+      backgroundColor: '#4A92D9',
+      backgroundOpacity: 0.9,
+      borderWidth: 0,
+    },
     preview: { textColor: '#FFFFFF', backgroundColor: '#4A92D9' },
   },
   {
-    id: 'pink-plain',
-    label: '粉字白边',
-    patch: { ...BASE_TEXT_PRESET, color: '#F0538C', borderColor: '#FFFFFF', borderWidth: 2 },
+    id: 'pink-bg',
+    label: '白字粉底',
+    patch: {
+      ...BASE_TEXT_PRESET,
+      color: '#FFFFFF',
+      backgroundColor: '#F0538C',
+      backgroundOpacity: 0.9,
+      borderWidth: 0,
+    },
     preview: { textColor: '#FFFFFF', backgroundColor: '#F0538C' },
   },
   {
     id: 'peach-plain',
     label: '米字粉边',
     patch: { ...BASE_TEXT_PRESET, color: '#FFEAC0', borderColor: '#D56F78', borderWidth: 2 },
-    preview: { textColor: '#FFEAC0', backgroundColor: '#2a2a32' },
+    preview: { textColor: '#FFEAC0', borderColor: '#D56F78' },
   },
   {
     id: 'orange-red',
     label: '橙字红边',
     patch: { ...BASE_TEXT_PRESET, color: '#FF9D20', borderColor: '#FF2734', borderWidth: 2 },
-    preview: { textColor: '#FF9D20', backgroundColor: '#2a2a32', borderColor: '#FF2734' },
+    preview: { textColor: '#FF9D20', borderColor: '#FF2734' },
   },
   {
     id: 'green-black',
     label: '绿字黑边',
     patch: { ...BASE_TEXT_PRESET, color: '#16F06A', borderColor: '#000000', borderWidth: 2 },
-    preview: { textColor: '#16F06A', backgroundColor: '#2a2a32', borderColor: '#000000' },
+    preview: { textColor: '#16F06A', borderColor: '#000000' },
   },
 ];
+
+/** 默认使用的预设（列表第一个） */
+export const DEFAULT_STYLE_PRESET_ID: StylePresetId = STYLE_PRESETS[0].id;
 
 const PRESET_MATCH_KEYS: Array<keyof SubtitleStyle> = [
   'color',

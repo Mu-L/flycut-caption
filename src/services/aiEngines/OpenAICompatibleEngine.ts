@@ -1,9 +1,6 @@
 // OpenAI 兼容引擎：通过 /chat/completions 对接字幕纠错 / 翻译
 import type { AIModelConfig, AIProgress, AISubtitleItem } from '@/types/ai'
 
-// 单次分片处理的最大条数
-const CHUNK_SIZE = 50
-
 export interface OpenAICompatibleEngineConfig {
   temperature?: number
 }
@@ -53,43 +50,31 @@ export class OpenAICompatibleEngine {
     stageLabel: string,
   ): Promise<AISubtitleItem[]> {
     if (items.length === 0) return []
-    const total = items.length
-    const results: AISubtitleItem[] = []
 
-    for (let i = 0; i < total; i += CHUNK_SIZE) {
-      const slice = items.slice(i, i + CHUNK_SIZE)
-      this.report({
-        status: 'running',
-        progress: Math.round((i / total) * 100),
-        data: `${stageLabel} ${i + 1}-${Math.min(i + CHUNK_SIZE, total)}/${total}`,
-      })
+    this.report({
+      status: 'running',
+      progress: 0,
+      data: `${stageLabel} ${items.length} 条字幕...`,
+    })
 
-      const parsed = await this.requestSlice(slice, model, system)
-      // 按 id 对齐回原 slice
-      const map = new Map(parsed.map((p) => [p.id, p.text]))
-      for (const item of slice) {
-        const text = map.get(item.id)
-        results.push({ id: item.id, text: typeof text === 'string' ? text : item.text })
-      }
-
-      this.report({
-        status: 'running',
-        progress: Math.round((Math.min(i + CHUNK_SIZE, total) / total) * 100),
-        data: `${stageLabel} ${Math.min(i + CHUNK_SIZE, total)}/${total} 完成`,
-      })
-    }
+    const parsed = await this.requestAll(items, model, system)
+    const map = new Map(parsed.map((entry) => [entry.id, entry.text]))
+    const results = items.map((item) => ({
+      id: item.id,
+      text: typeof map.get(item.id) === 'string' ? map.get(item.id)! : item.text,
+    }))
 
     this.report({ status: 'complete', progress: 100, data: `${stageLabel}完成` })
     return results
   }
 
-  private async requestSlice(
-    slice: AISubtitleItem[],
+  private async requestAll(
+    items: AISubtitleItem[],
     model: AIModelConfig,
     system: string,
   ): Promise<{ id: string; text: string }[]> {
     const userContent = JSON.stringify(
-      slice.map((s) => ({ id: s.id, text: s.text })),
+      items.map((item) => ({ id: item.id, text: item.text })),
     )
 
     const baseUrl = model.baseUrl.replace(/\/+$/, '')
@@ -125,10 +110,9 @@ export class OpenAICompatibleEngine {
       throw new Error('AI 返回内容无法解析为 JSON 数组')
     }
 
-    // 校验条数一致
-    if (parsed.length !== slice.length) {
+    if (parsed.length !== items.length) {
       throw new Error(
-        `AI 返回条数不一致：期望 ${slice.length}，实际 ${parsed.length}`,
+        `AI 返回条数不一致：期望 ${items.length}，实际 ${parsed.length}（可能超出模型上下文或输出长度限制）`,
       )
     }
     return parsed as { id: string; text: string }[]

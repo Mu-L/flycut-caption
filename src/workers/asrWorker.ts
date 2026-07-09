@@ -25,6 +25,89 @@ const originalFetch = globalThis.fetch;
 
 let activeConfig: TransformersASREngineConfig | null = null;
 
+type HubProgressInfo = {
+  status?: string;
+  file?: string;
+  name?: string;
+  progress?: number;
+  loaded?: number;
+  total?: number;
+};
+
+const filesLoading: Record<string, { loaded: number; total: number }> = {};
+
+function resetFilesLoading() {
+  for (const key of Object.keys(filesLoading)) {
+    delete filesLoading[key];
+  }
+}
+
+function formatFileLabel(file?: string) {
+  if (!file) return '模型文件';
+  const parts = file.split('/');
+  return parts[parts.length - 1] || file;
+}
+
+/** 将 transformers.js hub 进度事件规范为 ASRProgress，并汇总多文件总进度 */
+function normalizeHubProgress(raw: HubProgressInfo): ASRProgress | null {
+  const status = raw.status;
+  const file = raw.file;
+  const fileLabel = formatFileLabel(file);
+
+  if (status === 'ready') {
+    return {
+      status: 'loading',
+      data: '正在初始化模型...',
+      file,
+      progress: 99,
+    };
+  }
+
+  if (status === 'initiate' || status === 'download') {
+    return {
+      status: 'loading',
+      data: status === 'initiate' ? `准备下载 ${fileLabel}` : `正在下载 ${fileLabel}`,
+      file,
+    };
+  }
+
+  if (status === 'progress') {
+    if (file) {
+      filesLoading[file] = {
+        loaded: raw.loaded ?? 0,
+        total: raw.total ?? 0,
+      };
+    }
+
+    const aggregate = Object.values(filesLoading).reduce(
+      (acc, entry) => ({
+        loaded: acc.loaded + entry.loaded,
+        total: acc.total + entry.total,
+      }),
+      { loaded: 0, total: 0 },
+    );
+
+    const progress = aggregate.total > 0
+      ? Math.min(100, Math.round((aggregate.loaded / aggregate.total) * 100))
+      : Math.round(raw.progress ?? 0);
+
+    return {
+      status: 'progress',
+      data: `正在下载 ${fileLabel}`,
+      file,
+      progress,
+      total: aggregate.total > 0 ? aggregate.total : raw.total,
+    };
+  }
+
+  // 单文件完成事件不单独上报，避免进度条闪烁回 0
+  if (status === 'done') {
+    return null;
+  }
+
+  return null;
+}
+
 function resolveModelFileUrl(url: string): string | null {
   if (!activeConfig?.modelBaseUrl) return null;
   if (!url.includes('huggingface.co') || !url.includes(activeConfig.modelId)) return null;
@@ -112,23 +195,64 @@ class PipelineSingleton {
 }
 
 /**
- * 加载 ASR 模型
+ * 仅下载模型文件到浏览器缓存（不预热、不标记为可识别）
+ */
+async function downloadModelOnly({ config }: { config: TransformersASREngineConfig }) {
+  activeConfig = config;
+  resetFilesLoading();
+  console.log('ASR Worker开始下载模型:', config);
+
+  self.postMessage({
+    status: 'loading',
+    data: `正在下载模型 (${config.family})...`,
+    progress: 0,
+  } satisfies ASRProgress);
+
+  try {
+    await PipelineSingleton.getInstance(config, (progress) => {
+      const normalized = normalizeHubProgress(progress as HubProgressInfo);
+      if (normalized) {
+        self.postMessage(normalized);
+      }
+    });
+
+    console.log('ASR模型下载完成');
+    self.postMessage({
+      status: 'downloaded',
+      data: '模型下载完成',
+      progress: 100,
+    } satisfies ASRProgress);
+  } catch (error) {
+    console.error('ASR模型下载失败:', error);
+    self.postMessage({
+      status: 'error',
+      error: error instanceof Error ? error.message : '模型下载失败',
+    } satisfies ASRProgress);
+  }
+}
+
+/**
+ * 加载 ASR 模型（识别前调用，含 WebGPU 预热）
  */
 async function load({ config }: { config: TransformersASREngineConfig }) {
   activeConfig = config;
+  resetFilesLoading();
   console.log('ASR Worker开始加载模型:', config);
   
   self.postMessage({
     status: 'loading',
     data: `正在加载模型 (${config.family} / ${config.device})...`,
+    progress: 0,
   } satisfies ASRProgress);
 
   try {
     // 加载管道并保存以供将来使用
     const transcriber = await PipelineSingleton.getInstance(config, (progress) => {
-      // 添加进度回调以跟踪模型加载
-      console.log('ASR模型加载进度:', progress);
-      self.postMessage(progress);
+      const normalized = normalizeHubProgress(progress as HubProgressInfo);
+      console.log('ASR模型加载进度:', progress, normalized);
+      if (normalized) {
+        self.postMessage(normalized);
+      }
     });
 
     // WebGPU 需要预热（仅 whisper 系列传入 language 选项）
@@ -256,6 +380,10 @@ self.addEventListener('message', async (e) => {
   const { type, data } = e.data;
 
   switch (type) {
+    case 'download':
+      await downloadModelOnly(data);
+      break;
+
     case 'load':
       await load(data);
       break;

@@ -50,6 +50,10 @@ export interface SubtitleStyle {
   visible: boolean;
 }
 
+/**
+ * 默认字幕样式 = 第一个预设「白字黑边」
+ * （与 STYLE_PRESETS[0] / white-black 保持一致）
+ */
 export const defaultSubtitleStyle: SubtitleStyle = {
   fontId: DEFAULT_SUBTITLE_FONT_ID,
   fontSizeRatio: DEFAULT_FONT_SIZE_RATIO,
@@ -71,16 +75,40 @@ export const defaultSubtitleStyle: SubtitleStyle = {
   lineHeight: 1.2,
   letterSpacing: 0,
 
-  borderWidth: 1,
+  borderWidth: 2,
   shadowOffsetX: 0,
   shadowOffsetY: 0,
   shadowBlur: 0,
 
-  backgroundOpacity: 0.8,
+  backgroundOpacity: 0,
   backgroundRadius: 4,
   backgroundPadding: 8,
 
   visible: true,
+};
+
+/**
+ * 副字幕默认样式：基于主字幕，字号比例 × 0.75（保持与旧 SECONDARY_FONT_SCALE 一致）。
+ * bottomOffsetRatio / aspectPreset 共享 primary，渲染时不直接使用这两个字段。
+ */
+export const defaultSecondarySubtitleStyle: SubtitleStyle = {
+  ...defaultSubtitleStyle,
+  fontSizeRatio: DEFAULT_FONT_SIZE_RATIO * 0.75,
+};
+
+/**
+ * 主/副字幕样式对。
+ * - primary：主字幕完整样式（决定整体底边距与画面比例）
+ * - secondary：副字幕样式（颜色/字号/描边/背景/字体独立；bottomOffsetRatio 与 aspectPreset 共享 primary）
+ */
+export interface SubtitleStylePair {
+  primary: SubtitleStyle;
+  secondary: SubtitleStyle;
+}
+
+export const defaultSubtitleStylePair: SubtitleStylePair = {
+  primary: defaultSubtitleStyle,
+  secondary: defaultSecondarySubtitleStyle,
 };
 
 /** UI 展示：1080p 等价像素字号 */

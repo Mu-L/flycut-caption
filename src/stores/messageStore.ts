@@ -28,7 +28,12 @@ interface MessageActions {
   // 视频处理相关方法
   startVideoProcessing: (title: string) => string;
   updateVideoProcessingProgress: (id: string, progress: VideoProcessingProgress) => void;
-  completeVideoProcessing: (id: string, blob: Blob, filename: string) => void;
+  completeVideoProcessing: (
+    id: string,
+    blob: Blob | null,
+    filename: string,
+    savedPath?: string,
+  ) => void;
   errorVideoProcessing: (id: string, error: string) => void;
 }
 
@@ -170,42 +175,47 @@ export const useMessageStore = create<MessageStore>()(
         });
       },
       
-      completeVideoProcessing: (id, blob, filename) => {
-        const downloadHandler = async () => {
-          const types = [{
-            description: 'Video files',
-            accept: {
-              'video/mp4': ['.mp4'],
-              'video/webm': ['.webm'],
-            },
-          }];
-          
-          await saveFile(blob, filename, types);
-        };
-        
+      completeVideoProcessing: (id, blob, filename, savedPath) => {
+        const downloadHandler = blob
+          ? async () => {
+            const types = [{
+              description: 'Video files',
+              accept: {
+                'video/mp4': ['.mp4'],
+                'video/webm': ['.webm'],
+              },
+            }];
+            await saveFile(blob, filename, types);
+          }
+          : undefined;
+
+        const sizeText = blob
+          ? `文件大小: ${(blob.size / 1024 / 1024).toFixed(2)} MB`
+          : undefined;
+        const pathText = savedPath ? `保存位置: ${savedPath}` : undefined;
+        const content = [sizeText, pathText].filter(Boolean).join('\n') || '导出完成';
+
         get().updateMessage(id, {
           type: 'success',
           title: '视频处理完成',
-          content: `文件大小: ${(blob.size / 1024 / 1024).toFixed(2)} MB`,
-          processingResult: { blob, filename },
-          action: {
-            label: '下载视频',
-            handler: downloadHandler
-          },
+          content,
+          processingResult: { blob: blob ?? undefined, filename, savedPath },
+          action: downloadHandler
+            ? { label: '重新保存', handler: downloadHandler }
+            : undefined,
           progress: {
             stage: 'complete',
             progress: 100,
-            message: '处理完成'
-          }
+            message: '处理完成',
+          },
         });
-        
+
         toast.success('视频处理完成', {
-          description: '点击下载按钮保存视频',
+          description: savedPath ?? '视频已保存',
           id: `processing_${id}`,
-          action: {
-            label: '下载',
-            onClick: downloadHandler
-          }
+          action: downloadHandler
+            ? { label: '重新保存', onClick: downloadHandler }
+            : undefined,
         });
       },
       

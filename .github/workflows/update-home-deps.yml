@@ -1,0 +1,92 @@
+name: update-home-deps
+
+# 当 flycut-caption 发版后，自动给 flycut-caption-home 仓库提 PR
+# 升级 @flycut/caption-react 依赖并跑构建验证
+#
+# 触发方式：
+# 1. release workflow 成功完成后自动触发
+# 2. 手动在 Actions 页面触发
+#
+# 前置条件：在仓库 Settings → Secrets 中配置 HOME_REPO_PAT
+# （一个有权限对 x007xyz/flycut-caption-home 仓库提 PR 的 PAT 或 GitHub App token）
+on:
+  workflow_run:
+    workflows: ["release"]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  update:
+    # 仅在 release 成功时联动；手动触发时也允许
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get latest published npm version
+        id: npmver
+        run: |
+          VER=$(npm view @flycut/caption-react version 2>/dev/null || echo "")
+          if [ -z "$VER" ]; then
+            echo "::warning::@flycut/caption-react not found on npm, skip"
+          fi
+          echo "version=$VER" >> $GITHUB_OUTPUT
+
+      - name: Checkout home repo
+        if: steps.npmver.outputs.version != ''
+        uses: actions/checkout@v4
+        with:
+          repository: x007xyz/flycut-caption-home
+          token: ${{ secrets.HOME_REPO_PAT }}
+          ref: main
+
+      - name: Setup Node.js
+        if: steps.npmver.outputs.version != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Check current version
+        if: steps.npmver.outputs.version != ''
+        id: curver
+        run: |
+          CUR=$(node -p "require('./package.json').dependencies['@flycut/caption-react'].replace(/^\^/,'')")
+          echo "current=$CUR" >> $GITHUB_OUTPUT
+          echo "当前 home 仓库依赖: ^$CUR，npm 最新: ${{ steps.npmver.outputs.version }}"
+
+      - name: Skip if up-to-date
+        if: steps.npmver.outputs.version != '' && steps.npmver.outputs.version == steps.curver.outputs.current
+        run: echo "已是最新版本，无需升级"
+
+      - name: Update dependency & verify build
+        if: steps.npmver.outputs.version != '' && steps.npmver.outputs.version != steps.curver.outputs.current
+        run: |
+          npm install @flycut/caption-react@^${{ steps.npmver.outputs.version }}
+          # 补充 lightningcss linux 原生二进制，与 vercel.json 安装命令一致
+          npm install --no-save --platform=linux --arch=x64 lightningcss
+          # 跑构建验证升级后无破坏
+          npm run build
+        env:
+          NEXT_PUBLIC_GOOGLE_ANALYTICS_ID: ''
+          SITE_URL: https://caption.flycut.co
+
+      - name: Create PR to home repo
+        if: steps.npmver.outputs.version != '' && steps.npmver.outputs.version != steps.curver.outputs.current
+        env:
+          GH_TOKEN: ${{ secrets.HOME_REPO_PAT }}
+        run: |
+          BRANCH="deps/update-caption-react-${{ steps.npmver.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add package.json package-lock.json
+          git commit -m "deps: bump @flycut/caption-react to ^${{ steps.npmver.outputs.version }}
+
+          由 flycut-caption release 流水线自动触发升级。
+          已通过 next build 验证。"
+          git push origin "$BRANCH"
+          gh pr create \
+            --repo x007xyz/flycut-caption-home \
+            --base main \
+            --head "$BRANCH" \
+            --title "deps: bump @flycut/caption-react to ^${{ steps.npmver.outputs.version }}" \
+            --body "自动升级 \`@flycut/caption-react\` 至 \`^${{ steps.npmver.outputs.version }}\`，已通过 next build 验证。"

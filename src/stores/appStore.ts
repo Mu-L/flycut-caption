@@ -13,6 +13,7 @@ import type { AIModelConfig, AIProgress } from '@/types/ai'
 import { hasWebGPU } from '@/utils/audioUtils'
 import { DEFAULT_MODEL_ID } from '@/types/model'
 import { DEFAULT_WEB_MODEL_ID, getWebAsrModel } from '@/config/webAsrModels'
+import { isWebAsrModelId } from '@/utils/asrModelId'
 
 // 旧版 model_id（不在当前 manifest 中），升级后需迁移到 DEFAULT_MODEL_ID
 const LEGACY_MODEL_IDS = ['sensevoice-small-int8', 'paraformer-small-int8']
@@ -361,7 +362,10 @@ export const useAppStore = create<AppState & AppActions>()(
       initialize: async () => {
         // 兼容迁移：旧版 model_id（不在当前 manifest 中）→ DEFAULT_MODEL_ID
         set((state) => {
-          if (LEGACY_MODEL_IDS.includes(state.asrModelId)) {
+          if (
+            LEGACY_MODEL_IDS.includes(state.asrModelId)
+            || isWebAsrModelId(state.asrModelId)
+          ) {
             return { ...state, asrModelId: DEFAULT_MODEL_ID };
           }
           return state;
@@ -407,6 +411,12 @@ export const useAppStore = create<AppState & AppActions>()(
         selectedAIModelId: state.selectedAIModelId,
         smartCutSilenceThreshold: state.smartCutSilenceThreshold,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        if (isWebAsrModelId(state.asrModelId)) {
+          state.asrModelId = DEFAULT_MODEL_ID;
+        }
+      },
     }
     ),
     {

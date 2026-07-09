@@ -8,11 +8,13 @@ import {
   formatFileSize, 
   getVideoInfo, 
   createVideoURL, 
-  validateFileType 
+  validateFileType,
+  fetchBlobWithProgress,
 } from '@/utils/fileUtils';
+import { calcDownloadProgress, MEDIA_LOAD_PHASE } from '@/utils/mediaLoadProgress';
 import { readFileAsArrayBuffer } from '@/utils/fileUtils';
 import type { VideoFile } from '@/types/video';
-import { Upload, File, X, CheckCircle2, AlertCircle, Play } from 'lucide-react';
+import { Upload, File, X, CheckCircle2, AlertCircle, Play, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface FileUploadProps {
@@ -42,12 +44,14 @@ export function FileUpload({ className, onFileSelect }: FileUploadProps) {
   
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [loadProgress, setLoadProgress] = useState<number | null>(null);
   const [uploadedFile, setUploadedFile] = useState<VideoFile | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleFileProcessing = useCallback(async (file: File) => {
     setError(null);
     setIsProcessing(true);
+    setLoadProgress(MEDIA_LOAD_PHASE.START);
 
     try {
       // 验证文件类型
@@ -55,6 +59,7 @@ export function FileUpload({ className, onFileSelect }: FileUploadProps) {
         throw new Error(`${t('fileUpload.invalidFileType', { ns: 'components' })}: ${file.type}`);
       }
 
+      setLoadProgress(MEDIA_LOAD_PHASE.METADATA);
       // 读取文件为 ArrayBuffer (用于 ASR)
       const audioBuffer = await readFileAsArrayBuffer(file);
 
@@ -84,6 +89,7 @@ export function FileUpload({ className, onFileSelect }: FileUploadProps) {
         };
       }
 
+      setLoadProgress(MEDIA_LOAD_PHASE.FINALIZING);
       setUploadedFile(videoFile);
       
       // 更新应用状态
@@ -93,6 +99,7 @@ export function FileUpload({ className, onFileSelect }: FileUploadProps) {
       if (onFileSelect) {
         onFileSelect(videoFile, audioBuffer);
       }
+      setLoadProgress(MEDIA_LOAD_PHASE.COMPLETE);
 
     } catch (err) {
       console.error('文件处理失败:', err);
@@ -159,19 +166,19 @@ export function FileUpload({ className, onFileSelect }: FileUploadProps) {
 
   // 处理示例视频
   const handleDemoVideo = useCallback(async () => {
+    if (isProcessing) return;
+
     setError(null);
     setIsProcessing(true);
+    setLoadProgress(MEDIA_LOAD_PHASE.START);
 
     try {
       const demoUrl = "https://fly-cut.oss-cn-hangzhou.aliyuncs.com/demo/whisper-timestamps-demo.mp4";
 
-      // 获取远程视频文件
-      const response = await fetch(demoUrl);
-      if (!response.ok) {
-        throw new Error('Failed to fetch demo video');
-      }
-
-      const blob = await response.blob();
+      const { blob } = await fetchBlobWithProgress(demoUrl, (loaded, total) => {
+        setLoadProgress(calcDownloadProgress(loaded, total));
+      });
+      setLoadProgress(MEDIA_LOAD_PHASE.METADATA);
       const arrayBuffer = await blob.arrayBuffer();
 
       // 创建 File 对象，兼容性处理
@@ -186,9 +193,9 @@ export function FileUpload({ className, onFileSelect }: FileUploadProps) {
         file = fileBlob as File;
       }
 
-      // 获取视频信息
       const videoInfo = await getVideoInfo(file);
 
+      setLoadProgress(MEDIA_LOAD_PHASE.FINALIZING);
       const videoFile: VideoFile = {
         file,
         url: createVideoURL(file),
@@ -207,6 +214,7 @@ export function FileUpload({ className, onFileSelect }: FileUploadProps) {
       if (onFileSelect) {
         onFileSelect(videoFile, arrayBuffer);
       }
+      setLoadProgress(MEDIA_LOAD_PHASE.COMPLETE);
 
     } catch (err) {
       console.error('Demo video loading failed:', err);
@@ -215,8 +223,9 @@ export function FileUpload({ className, onFileSelect }: FileUploadProps) {
       setAppError(errorMessage);
     } finally {
       setIsProcessing(false);
+      setLoadProgress(null);
     }
-  }, [setVideoFile, setAppError, onFileSelect]);
+  }, [isProcessing, setVideoFile, setAppError, onFileSelect]);
 
   return (
     <div className={cn('w-full', className)}>
@@ -249,7 +258,10 @@ export function FileUpload({ className, onFileSelect }: FileUploadProps) {
           {isProcessing ? (
             <>
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4" />
-              <p className="text-sm text-muted-foreground">{t('processingFile', { ns: 'messages' })}</p>
+              <p className="text-sm text-muted-foreground">
+                {t('processingFile', { ns: 'messages' })}
+                {loadProgress !== null ? ` ${loadProgress}%` : ''}
+              </p>
             </>
           ) : (
             <>
@@ -278,8 +290,15 @@ export function FileUpload({ className, onFileSelect }: FileUploadProps) {
                 disabled={isProcessing}
                 className="mt-4 inline-flex items-center space-x-2 px-4 py-2 text-sm font-medium text-primary bg-primary/10 border border-primary/20 rounded-md hover:bg-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Play className="h-4 w-4" />
-                <span>使用示例视频</span>
+                {isProcessing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
+                <span>
+                  使用示例视频
+                  {isProcessing && loadProgress !== null ? ` ${loadProgress}%` : ''}
+                </span>
               </button>
             </>
           )}

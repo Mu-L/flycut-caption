@@ -16,7 +16,8 @@ export type {
   ASRProgress,
   VideoSegment,
   VideoProcessingProgress,
-  SubtitleStyle
+  SubtitleStyle,
+  SubtitleStylePair
 } from './types'
 
 // Configuration export

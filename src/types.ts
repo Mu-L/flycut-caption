@@ -35,7 +35,7 @@ export interface ASRProgress {
   message?: string
 }
 
-export type { SubtitleStyle } from './subtitle/subtitleStyle'
+export type { SubtitleStyle, SubtitleStylePair } from './subtitle/subtitleStyle'
 
 // FlyCut Caption specific configuration
 export interface FlyCutCaptionConfig {

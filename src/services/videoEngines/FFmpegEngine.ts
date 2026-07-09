@@ -297,14 +297,15 @@ export class FFmpegEngine implements IVideoProcessingEngine {
       args.push('-filter_complex', filterComplex);
     }
 
-    // 质量设置
-    if (options.quality === 'high') {
-      args.push('-crf', '18');
-    } else if (options.quality === 'medium') {
-      args.push('-crf', '23');
-    } else {
-      args.push('-crf', '28');
-    }
+    // 质量 + 速度档（与桌面 FFmpeg 引擎一致）
+    const preset =
+      options.quality === 'high' ? 'medium'
+        : options.quality === 'low' ? 'ultrafast'
+          : 'veryfast';
+    const crf =
+      options.quality === 'high' ? '18'
+        : options.quality === 'low' ? '28'
+          : '23';
 
     // 音频处理
     if (!options.preserveAudio) {
@@ -312,7 +313,7 @@ export class FFmpegEngine implements IVideoProcessingEngine {
     }
 
     // 输出格式
-    args.push('-c:v', 'libx264');
+    args.push('-c:v', 'libx264', '-preset', preset, '-crf', crf);
     if (options.preserveAudio) {
       args.push('-c:a', 'aac');
     }

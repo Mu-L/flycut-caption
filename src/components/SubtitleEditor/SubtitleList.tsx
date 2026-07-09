@@ -361,24 +361,26 @@ export function SubtitleList({
 
       {/* Subtitle List (scrollable) */}
       <div className="flex-1 overflow-y-auto">
-        {transcript.chunks.map((chunk, index) => {
-          const isActive = !chunk.deleted;
-          const isCurrent = currentChunk?.id === chunk.id;
-          const isSelected = selectedIds.has(chunk.id);
-          
-          return (
-            <SubtitleItem
-              key={chunk.id}
-              chunk={chunk}
-              index={index}
-              isActive={isActive}
-              isCurrent={isCurrent}
-              isSelected={isSelected}
-              onToggleSelection={handleToggleSelection}
-              onSeekTo={seekTo}
-            />
-          );
-        })}
+        {transcript.chunks
+          .filter(chunk => !chunk.deleted)
+          .map((chunk, index) => {
+            const isActive = !chunk.deleted;
+            const isCurrent = currentChunk?.id === chunk.id;
+            const isSelected = selectedIds.has(chunk.id);
+
+            return (
+              <SubtitleItem
+                key={chunk.id}
+                chunk={chunk}
+                index={index}
+                isActive={isActive}
+                isCurrent={isCurrent}
+                isSelected={isSelected}
+                onToggleSelection={handleToggleSelection}
+                onSeekTo={seekTo}
+              />
+            );
+          })}
       </div>
 
       {/* Status/toolbar area at the bottom */}

@@ -17,11 +17,24 @@ async fn pick_media_file() -> Option<String> {
         .add_filter(
             "Media files",
             &[
-                "mp4", "webm", "mov", "avi", "mkv", "ogg",
-                "mp3", "wav", "m4a", "flac", "aac",
+                "mp4", "webm", "mov", "avi", "mkv", "ogg", "mp3", "wav", "m4a", "flac", "aac",
             ],
         )
         .pick_file()
+        .await;
+
+    file.map(|f| f.path().to_string_lossy().to_string())
+}
+
+/// 弹出原生保存对话框，返回用户选定的输出文件路径。
+#[tauri::command]
+async fn pick_save_media_file(default_name: String) -> Option<String> {
+    use rfd::AsyncFileDialog;
+
+    let file = AsyncFileDialog::new()
+        .set_file_name(&default_name)
+        .add_filter("Video files", &["mp4", "webm", "mov", "mkv"])
+        .save_file()
         .await;
 
     file.map(|f| f.path().to_string_lossy().to_string())
@@ -33,6 +46,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_ready,
             pick_media_file,
+            pick_save_media_file,
+            commands::media::stage_media_file,
+            commands::media::download_media_to_temp,
             commands::asr::check_funasr_environment,
             commands::asr::transcribe_with_funasr,
             commands::model::list_available_models,

@@ -8,8 +8,9 @@ import {
 import { ensureSubtitleFont } from './subtitleFonts';
 import { layoutSubtitleLines, resolveLayoutMaxWidth } from './subtitleLayout';
 
-const SECONDARY_FONT_SCALE = 0.75;
 const BLOCK_GAP_RATIO = 0.15;
+
+export type SubtitleDisplayMode = 'Bilingual' | 'Main' | 'Second';
 
 export interface SubtitleRenderContent {
   primaryText: string;
@@ -18,8 +19,12 @@ export interface SubtitleRenderContent {
 
 export interface SubtitleRenderFrame {
   canvas: HTMLCanvasElement;
-  style: SubtitleStyle;
+  primaryStyle: SubtitleStyle;
+  /** 副字幕样式（默认回退到 primaryStyle） */
+  secondaryStyle?: SubtitleStyle;
   content: SubtitleRenderContent;
+  /** 显示模式：默认 Bilingual */
+  displayMode?: SubtitleDisplayMode;
   videoHeight: number;
   videoWidth: number;
   videoDisplayWidth: number;
@@ -29,6 +34,7 @@ export interface SubtitleRenderFrame {
 interface TextBlock {
   lines: string[];
   fontSize: number;
+  style: SubtitleStyle;
 }
 
 function drawTextLine(
@@ -43,26 +49,29 @@ function drawTextLine(
   videoRight: number,
   centerX: number,
 ): void {
-  const scaledLineHeight = displayFontSize * style.lineHeight;
-
   if (style.backgroundOpacity > 0) {
     const textMetrics = ctx.measureText(line);
     const textWidth = textMetrics.width;
     const scaledBgPadding = scaleMetric(style.backgroundPadding);
+    const ascent = textMetrics.actualBoundingBoxAscent || displayFontSize * 0.8;
+    const descent = textMetrics.actualBoundingBoxDescent || displayFontSize * 0.2;
+    const textHeight = ascent + descent;
+    const bgHeight = textHeight + scaledBgPadding * 2;
+    const bgY = y - ascent - scaledBgPadding;
 
     ctx.fillStyle = `${style.backgroundColor}${Math.round(style.backgroundOpacity * 255).toString(16).padStart(2, '0')}`;
 
     let bgX = centerX - textWidth / 2 - scaledBgPadding;
-    if (style.textAlign === 'left') bgX = videoLeft + scaledBgPadding;
-    if (style.textAlign === 'right') bgX = videoRight - textWidth - scaledBgPadding;
+    if (style.textAlign === 'left') bgX = videoLeft - scaledBgPadding;
+    if (style.textAlign === 'right') bgX = videoRight - textWidth - scaledBgPadding * 2;
 
     ctx.beginPath();
     const scaledBgRadius = scaleMetric(style.backgroundRadius);
     ctx.roundRect(
       bgX,
-      y - displayFontSize - scaledBgPadding,
+      bgY,
       textWidth + scaledBgPadding * 2,
-      scaledLineHeight + scaledBgPadding,
+      bgHeight,
       scaledBgRadius,
     );
     ctx.fill();
@@ -123,13 +132,19 @@ function drawTextLine(
 
 /**
  * 在 Canvas 上绘制一帧字幕（预览与导出共用逻辑）。
- * 双语：副字幕靠下，主字幕在上方。
+ * 支持主/副字幕独立样式与 displayMode：
+ * - 'Main'：只渲染主字幕（primaryStyle）
+ * - 'Second'：只渲染副字幕（secondaryStyle），位置共享 primary 底边距
+ * - 'Bilingual'：主字幕在上、副字幕在下，整体底边距由 primaryStyle 决定
+ *   （blocks 自下而上绘制：先副后主 → 视觉上主上副下）
  */
 export async function renderSubtitleFrame(frame: SubtitleRenderFrame): Promise<void> {
   const {
     canvas,
-    style,
+    primaryStyle,
+    secondaryStyle,
     content,
+    displayMode = 'Bilingual',
     videoHeight,
     videoWidth,
     videoDisplayWidth,
@@ -142,29 +157,26 @@ export async function renderSubtitleFrame(frame: SubtitleRenderFrame): Promise<v
   const { width, height } = canvas;
   ctx.clearRect(0, 0, width, height);
 
+  const effectiveSecondaryStyle = secondaryStyle ?? primaryStyle;
   const scaleMetric = (videoPixels: number) =>
     scaleVideoMetric(videoPixels, videoDisplayHeight || videoHeight, videoHeight);
 
-  const videoFontSize = resolveVideoFontSize(style, videoHeight);
-  const maxWidthVideo = resolveLayoutMaxWidth(videoWidth, style);
+  // 最大宽度与底边距始终基于 primaryStyle（位置与比例共享）
+  const maxWidthVideo = resolveLayoutMaxWidth(videoWidth, primaryStyle);
   const maxWidthDisplay = scaleMetric(maxWidthVideo);
 
-  const primaryVideoSize = videoFontSize;
-  const secondaryVideoSize = Math.round(videoFontSize * SECONDARY_FONT_SCALE);
+  const primaryVideoSize = resolveVideoFontSize(primaryStyle, videoHeight);
+  const secondaryVideoSize = resolveVideoFontSize(effectiveSecondaryStyle, videoHeight);
 
-  await ensureSubtitleFont(style, primaryVideoSize);
-
-  const primaryLines = layoutSubtitleLines(content.primaryText, style, {
-    maxWidth: maxWidthDisplay,
-    videoHeight,
-    fontSizePx: scaleMetric(primaryVideoSize),
-  });
+  const showPrimary = displayMode !== 'Second';
+  const showSecondary = displayMode !== 'Main' && Boolean(content.secondText?.trim());
 
   const blocks: TextBlock[] = [];
 
-  if (content.secondText?.trim()) {
-    await ensureSubtitleFont(style, secondaryVideoSize);
-    const secondaryLines = layoutSubtitleLines(content.secondText, style, {
+  // 自下而上绘制：先压入副字幕（底部），再压入主字幕（上方）
+  if (showSecondary) {
+    await ensureSubtitleFont(effectiveSecondaryStyle, secondaryVideoSize);
+    const secondaryLines = layoutSubtitleLines(content.secondText!, effectiveSecondaryStyle, {
       maxWidth: maxWidthDisplay,
       videoHeight,
       fontSizePx: scaleMetric(secondaryVideoSize),
@@ -173,15 +185,25 @@ export async function renderSubtitleFrame(frame: SubtitleRenderFrame): Promise<v
       blocks.push({
         lines: secondaryLines,
         fontSize: scaleMetric(secondaryVideoSize),
+        style: effectiveSecondaryStyle,
       });
     }
   }
 
-  if (primaryLines.length > 0) {
-    blocks.push({
-      lines: primaryLines,
-      fontSize: scaleMetric(primaryVideoSize),
+  if (showPrimary) {
+    await ensureSubtitleFont(primaryStyle, primaryVideoSize);
+    const primaryLines = layoutSubtitleLines(content.primaryText, primaryStyle, {
+      maxWidth: maxWidthDisplay,
+      videoHeight,
+      fontSizePx: scaleMetric(primaryVideoSize),
     });
+    if (primaryLines.length > 0) {
+      blocks.push({
+        lines: primaryLines,
+        fontSize: scaleMetric(primaryVideoSize),
+        style: primaryStyle,
+      });
+    }
   }
 
   if (blocks.length === 0) return;
@@ -189,17 +211,14 @@ export async function renderSubtitleFrame(frame: SubtitleRenderFrame): Promise<v
   const videoLeft = (width - videoDisplayWidth) / 2;
   const videoRight = videoLeft + videoDisplayWidth;
   const centerX = videoLeft + videoDisplayWidth / 2;
-  const bottomOffsetVideo = resolveBottomOffset(style, videoHeight);
+  const bottomOffsetVideo = resolveBottomOffset(primaryStyle, videoHeight);
   let bottomY = height - scaleMetric(bottomOffsetVideo);
 
-  const scaledLetterSpacing = scaleMetric(style.letterSpacing);
-
   for (const block of blocks) {
-    ctx.font = buildCanvasFont(style, block.fontSize);
+    ctx.font = buildCanvasFont(block.style, block.fontSize);
     ctx.textBaseline = 'bottom';
-    if (scaledLetterSpacing !== 0) {
-      ctx.letterSpacing = `${scaledLetterSpacing}px`;
-    }
+    const scaledLetterSpacing = scaleMetric(block.style.letterSpacing);
+    ctx.letterSpacing = `${scaledLetterSpacing}px`;
 
     for (let i = block.lines.length - 1; i >= 0; i--) {
       drawTextLine(
@@ -207,14 +226,14 @@ export async function renderSubtitleFrame(frame: SubtitleRenderFrame): Promise<v
         block.lines[i],
         centerX,
         bottomY,
-        style,
+        block.style,
         block.fontSize,
         scaleMetric,
         videoLeft,
         videoRight,
         centerX,
       );
-      bottomY -= block.fontSize * style.lineHeight;
+      bottomY -= block.fontSize * block.style.lineHeight;
     }
 
     bottomY -= block.fontSize * BLOCK_GAP_RATIO;

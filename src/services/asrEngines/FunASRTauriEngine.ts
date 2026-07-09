@@ -11,14 +11,28 @@ interface FunASREnvironmentStatus {
 }
 
 export class FunASRTauriEngine {
-  private onProgress: ((progress: ASRProgress) => void) | null = null;
+  private progressCallbacks = new Set<(progress: ASRProgress) => void>();
 
   setProgressCallback(callback: (progress: ASRProgress) => void) {
-    this.onProgress = callback;
+    this.progressCallbacks.clear();
+    this.progressCallbacks.add(callback);
+  }
+
+  addProgressCallback(callback: (progress: ASRProgress) => void): () => void {
+    this.progressCallbacks.add(callback);
+    return () => {
+      this.progressCallbacks.delete(callback);
+    };
+  }
+
+  private emitProgress(progress: ASRProgress) {
+    for (const callback of this.progressCallbacks) {
+      callback(progress);
+    }
   }
 
   async loadModel(modelId?: string): Promise<void> {
-    this.onProgress?.({ status: 'loading', data: '检查 FunASR 模型和运行程序...' });
+    this.emitProgress({ status: 'loading', data: '检查 FunASR 模型和运行程序...' });
 
     const status = await invoke<FunASREnvironmentStatus>('check_funasr_environment', {
       modelId,
@@ -35,7 +49,7 @@ export class FunASRTauriEngine {
       throw new Error(status.sidecarError || 'FunASR 运行程序缺失：缺少 funasr-asr sidecar 可执行文件。');
     }
 
-    this.onProgress?.({ status: 'loaded' });
+    this.emitProgress({ status: 'loaded' });
   }
 
   isReady(): boolean {
@@ -51,7 +65,7 @@ export class FunASRTauriEngine {
       throw new Error('Tauri 引擎需要本地文件路径');
     }
 
-    this.onProgress?.({
+    this.emitProgress({
       status: 'running',
       data: '正在使用 FunASR 本地引擎识别，长视频可能需要等待...',
     });
@@ -67,11 +81,11 @@ export class FunASRTauriEngine {
       stage: 'sidecar 返回',
     });
 
-    this.onProgress?.({ status: 'complete', result });
+    this.emitProgress({ status: 'complete', result });
     return result;
   }
 
   destroy(): void {
-    this.onProgress = null;
+    this.progressCallbacks.clear();
   }
 }

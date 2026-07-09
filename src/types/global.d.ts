@@ -1,6 +1,7 @@
 // File System Access API 类型定义
 
 interface FileSystemFileHandle {
+  readonly name: string;
   createWritable(): Promise<FileSystemWritableFileStream>;
   getFile(): Promise<File>;
 }

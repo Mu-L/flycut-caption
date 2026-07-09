@@ -19,8 +19,9 @@ export interface Message {
   persistent?: boolean; // 是否持久化显示
   progress?: VideoProcessingProgress; // 视频处理进度
   processingResult?: {
-    blob: Blob;
+    blob?: Blob;
     filename: string;
+    savedPath?: string;
   };
   action?: {
     label: string;

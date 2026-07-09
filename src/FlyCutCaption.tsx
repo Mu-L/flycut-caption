@@ -2,14 +2,15 @@
 
 import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/stores/appStore';
-import { useChunks, useWordChunks, useHasWordTimestamps, useSetTranscript, useHistoryStore } from '@/stores/historyStore';
-import { getCuttingChunks } from '@/utils/asrTranscriptUtils';
+import { useChunks, useWordChunks, useHasWordTimestamps, useHistoryStore } from '@/stores/historyStore';
+import { buildVideoExportSegments } from '@/utils/videoExportSegments';
+import { calcDownloadProgress, MEDIA_LOAD_PHASE } from '@/utils/mediaLoadProgress';
 import { useThemeStore } from '@/stores/themeStore';
 import { useHotkeys } from '@/hooks/useHotkeys';
 import { LocaleProvider, useTranslation, useLocale } from '@/contexts/LocaleProvider';
 import { EnhancedVideoPlayer } from '@/components/VideoPlayer/EnhancedVideoPlayer';
 import type { EnhancedVideoPlayerRef } from '@/components/VideoPlayer/EnhancedVideoPlayer';
-import { SubtitleList } from '@/components/SubtitleEditor/SubtitleList';
+import { SubtitleEditorPanel } from '@/components/SubtitleEditor/SubtitleEditorPanel';
 import { useASR } from '@/hooks/useASR';
 import { ASRSettingsPanel } from '@/components/ProcessingPanel/ASRSettingsPanel';
 import { AISettingsPanel } from '@/components/AISettingsPanel';
@@ -21,9 +22,9 @@ import { ToastContainer, MessageCenterButton } from '@/components/MessageCenter'
 import { LanguageSelector } from '@/components/LanguageSelector';
 import { BrandLogo } from '@/components/BrandLogo';
 import { SubtitleSettings } from '@/components/SubtitleSettings';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import {
-  defaultSubtitleStyle,
-  applyShadowSize,
+  defaultSubtitleStylePair,
   registerSubtitleFonts,
   serializeSubtitleExport,
   getExportFilename,
@@ -31,8 +32,9 @@ import {
   getExportFileTypes,
   applyAspectPreset,
   inferAspectPreset,
-  type SubtitleStyle,
+  type SubtitleStylePair,
   type SubtitleExportFormat,
+  type SubtitleDisplayMode,
 } from '@/subtitle';
 import { isTauriRuntime } from '@/utils/runtime';
 import { cn } from '@/lib/utils';
@@ -44,8 +46,13 @@ import {
 } from '@/stores/messageStore';
 import { UnifiedVideoProcessor } from '@/services/UnifiedVideoProcessor';
 import { saveFile } from '@/utils/createFileWriter';
-import { loadMediaFromUrl } from '@/utils/fileUtils';
-import { AudioWaveform, Download, Eye, EyeOff, Github, Link2, Maximize2, Mic2, Play, Redo2, Scissors, Upload, Wand2, Keyboard, Undo2, ZoomIn, ZoomOut, Settings, Loader2 } from 'lucide-react';
+import {
+  pickVideoExportSaveTarget,
+  writeProcessedVideo,
+  type VideoExportSaveTarget,
+} from '@/utils/exportSavePath';
+import { fetchBlobWithProgress, loadMediaFromUrl } from '@/utils/fileUtils';
+import { AudioWaveform, Download, Eye, EyeOff, Github, Link2, Maximize2, Play, Redo2, Scissors, Upload, Wand2, Keyboard, Undo2, ZoomIn, ZoomOut, Settings, Loader2, ChevronDown, Video, FileText } from 'lucide-react';
 import { runSmartCutBlank } from '@/utils/smartCutBlank';
 import { toast } from 'sonner';
 import type { SubtitleChunk } from '@/types/subtitle';
@@ -53,6 +60,8 @@ import type { VideoFile, VideoSegment, VideoProcessingProgress } from '@/types/v
 import type { VideoProcessingOptions, VideoEngineType } from '@/types/videoEngine';
 import type { FlyCutCaptionProps } from './types';
 import { defaultConfig } from './types';
+// 示例视频：Vite 返回打包后的 URL
+import demoVideoUrl from '@/assets/demo.mp4';
 
 type AimuTab = 'style' | 'tools' | 'options' | 'api';
 
@@ -61,50 +70,6 @@ interface BrowserPerformanceMemory {
   totalJSHeapSize: number;
   jsHeapSizeLimit: number;
 }
-
-const mockTranscript = {
-  language: 'zh',
-  duration: 44.8,
-  text: 'Aimu 风格字幕编辑演示',
-  chunks: [
-    {
-      id: 'mock-1',
-      text: '今天我们把一段口播快速整理成适合发布的双语字幕。',
-      secondText: 'Today we turn a spoken clip into bilingual captions ready to publish.',
-      timestamp: [0.2, 4.8] as [number, number],
-    },
-    {
-      id: 'mock-2',
-      text: '先识别音频，再在时间轴上微调每一句的起止点。',
-      secondText: 'First transcribe the audio, then tune every sentence on the timeline.',
-      timestamp: [5.2, 9.6] as [number, number],
-    },
-    {
-      id: 'mock-3',
-      text: '删除停顿和口误后，预览模式会自动跳过被裁掉的片段。',
-      secondText: 'After removing pauses and mistakes, preview mode skips the cut segments.',
-      timestamp: [10.4, 15.7] as [number, number],
-    },
-    {
-      id: 'mock-4',
-      text: '字幕样式可以直接同步到左侧视频预览。',
-      secondText: 'Caption styling syncs directly to the video preview on the left.',
-      timestamp: [16.3, 20.8] as [number, number],
-    },
-    {
-      id: 'mock-5',
-      text: '底部波形用来快速定位声音峰值和空白区间。',
-      secondText: 'The waveform below helps locate peaks and silent gaps quickly.',
-      timestamp: [21.7, 26.1] as [number, number],
-    },
-    {
-      id: 'mock-6',
-      text: '最后导出 SRT、JSON，或者把字幕直接烧录进视频。',
-      secondText: 'Finally export SRT, JSON, or burn the captions into the video.',
-      timestamp: [27.2, 32.4] as [number, number],
-    },
-  ],
-};
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const waveformDecodeLimitBytes = 180 * 1024 * 1024;
@@ -162,45 +127,6 @@ async function extractWaveformPeaks(videoFile: VideoFile): Promise<number[] | nu
   }
 }
 
-function MockVideoPreview({ className }: { className?: string }) {
-  const { t } = useTranslation();
-
-  return (
-    <div data-testid="mock-video-preview" className={cn('mock-video-preview relative h-full w-full overflow-hidden', className)}>
-      <div className="mock-video-preview-bg absolute inset-0" />
-      <div className="mock-video-frame absolute inset-x-[12%] top-[12%] aspect-video rounded border shadow-2xl">
-        <div className="mock-video-grid absolute inset-0 bg-[size:42px_42px] opacity-55" />
-        <div className="mock-video-badge absolute left-6 top-5 flex items-center gap-2 rounded px-2 py-1 text-[11px]">
-          <span className="h-1.5 w-1.5 rounded-full bg-aimu-coral" />
-          {t('components.workstation.mockPreview')}
-        </div>
-        <div className="absolute inset-x-8 bottom-12 text-center">
-          <div className="mock-subtitle-primary mx-auto inline-block max-w-[82%] rounded px-4 py-2 text-[22px] font-semibold leading-snug shadow-lg">
-            {t('components.workstation.mockSubtitlePrimary')}
-          </div>
-          <div className="mock-subtitle-secondary mx-auto mt-2 inline-block max-w-[82%] rounded px-3 py-1.5 text-sm">
-            {t('components.workstation.mockSubtitleSecondary')}
-          </div>
-        </div>
-        <button className="mock-play-button absolute left-1/2 top-1/2 flex h-14 w-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full backdrop-blur">
-          <Play className="h-7 w-7 fill-current" />
-        </button>
-      </div>
-      <div className="mock-video-meta absolute bottom-4 left-4 right-4 flex items-center justify-between text-[11px]">
-        <div className="flex items-center gap-2">
-          <Mic2 className="h-3.5 w-3.5 text-aimu-coral" />
-          <span>{t('components.workstation.mockFileName')}</span>
-        </div>
-        <div className="flex items-center gap-3 font-mono">
-          <span>00:21.7</span>
-          <span>/</span>
-          <span>00:44.8</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 const TIMELINE_ZOOM_LEVELS = [
   { pxPerSec: 5,   minorStep: 10,  majorStep: 60 },  // 10 秒/小格, 1 分钟/大格
   { pxPerSec: 10,  minorStep: 5,   majorStep: 30 },  // 5 秒/小格, 30 秒/大格
@@ -219,6 +145,8 @@ function TimelineWaveform({
   onSeek,
   isASRLoading,
   asrProgress,
+  isVideoProcessing,
+  videoProgress,
   mediaWaveformPeaks,
 }: {
   currentTime: number;
@@ -229,6 +157,10 @@ function TimelineWaveform({
   isASRLoading?: boolean;
   /** ASR 进度信息 */
   asrProgress?: import('@/types/subtitle').ASRProgress | null;
+  /** 视频是否正在导出处理 */
+  isVideoProcessing?: boolean;
+  /** 视频导出进度 */
+  videoProgress?: VideoProcessingProgress | null;
   mediaWaveformPeaks?: number[] | null;
 }) {
   const { t } = useTranslation();
@@ -267,6 +199,8 @@ function TimelineWaveform({
   ), [chunks]);
 
   const waveformPeaks = useMemo(() => {
+    // 初始状态（无媒体）：不生成合成波形，避免空时间轴出现波形残留
+    if (duration <= 0) return [];
     if (mediaWaveformPeaks?.length) {
       return mediaWaveformPeaks;
     }
@@ -299,7 +233,7 @@ function TimelineWaveform({
 
       return clamp((signal + pulse) * 0.72 + 0.12, 0.08, 0.96);
     });
-  }, [activeRanges, mediaWaveformPeaks, safeDuration]);
+  }, [activeRanges, mediaWaveformPeaks, safeDuration, duration]);
 
   const handleZoomOut = useCallback(() => {
     setZoomIndex((index) => Math.max(minZoomIndex, index - 1));
@@ -327,16 +261,17 @@ function TimelineWaveform({
   }, [safeDuration]);
 
   const handleTimelineClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    if (!onSeek) return;
+    if (!onSeek || duration <= 0) return;
 
     const bounds = event.currentTarget.getBoundingClientRect();
     const clickX = event.clientX - bounds.left;
     const clickTime = clickX / pixelsPerSecond;
     onSeek(Math.max(0, Math.min(safeDuration, clickTime)));
-  }, [onSeek, safeDuration, pixelsPerSecond]);
+  }, [duration, onSeek, safeDuration, pixelsPerSecond]);
 
   // 自动滚动使播放头保持可见
   useEffect(() => {
+    if (duration <= 0) return;
     const viewport = viewportRef.current;
     if (!viewport) return;
 
@@ -350,7 +285,7 @@ function TimelineWaveform({
         behavior: 'smooth',
       });
     }
-  }, [playheadPosition]);
+  }, [duration, playheadPosition]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -399,6 +334,8 @@ function TimelineWaveform({
   useEffect(() => {
     const canvas = waveformCanvasRef.current;
     if (!canvas || viewportMetrics.width <= 0 || viewportMetrics.height <= 0) return;
+    // 初始状态（无媒体）：不绘制刻度/网格/波形，由空状态提示层占位
+    if (duration <= 0) return;
 
     const width = Math.max(1, Math.floor(viewportMetrics.width));
     const height = Math.max(1, Math.floor(viewportMetrics.height));
@@ -523,6 +460,7 @@ function TimelineWaveform({
     safeDuration,
     viewportMetrics,
     waveformPeaks,
+    duration,
   ]);
 
   return (
@@ -539,9 +477,17 @@ function TimelineWaveform({
                 {asrProgress?.progress !== undefined ? ` · ${Math.round(asrProgress.progress)}%` : ''}
               </span>
             </span>
-          ) : (
-            <span className="font-mono text-[11px] text-aimu-text-muted">{formatTimelineTime(currentTime)} / {formatTimelineTime(safeDuration)}</span>
-          )}
+          ) : isVideoProcessing ? (
+            <span className="flex items-center gap-1.5 text-aimu-coral">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span className="font-mono text-[11px]">
+                {videoProgress?.message || t('components.workstation.exportProgress')}
+                {videoProgress?.progress !== undefined ? ` · ${Math.round(videoProgress.progress)}%` : ''}
+              </span>
+            </span>
+          ) : duration > 0 ? (
+            <span className="font-mono text-[11px] text-aimu-text-muted">{formatTimelineTime(currentTime)} / {formatTimelineTime(duration)}</span>
+          ) : null}
         </div>
         <div className="flex items-center gap-1 text-aimu-text-muted">
           <button
@@ -606,7 +552,14 @@ function TimelineWaveform({
               className="pointer-events-none sticky left-0 top-0 z-0 block h-full"
               aria-hidden="true"
             />
-            {showSubtitleLayer && chunks.map((chunk) => {
+            {duration <= 0 && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-aimu-text-muted">
+                {t('components.workstation.emptyTimelineHint')}
+              </div>
+            )}
+            {showSubtitleLayer && chunks
+              .filter(chunk => !chunk.deleted)
+              .map((chunk) => {
               const leftPx = chunk.timestamp[0] * pixelsPerSecond;
               const widthPx = (chunk.timestamp[1] - chunk.timestamp[0]) * pixelsPerSecond;
               const label = [chunk.text, chunk.secondText].filter(Boolean).join(' / ');
@@ -615,9 +568,7 @@ function TimelineWaveform({
                   key={chunk.id}
                   className={cn(
                     'absolute bottom-1 top-8 z-10 flex cursor-pointer items-center overflow-hidden rounded-sm border px-1.5 shadow-sm',
-                    chunk.deleted
-                      ? 'border-aimu-coral/45 bg-aimu-coral/18'
-                      : 'border-aimu-purple/65 bg-aimu-purple/30'
+                    'border-aimu-purple/65 bg-aimu-purple/30'
                   )}
                   style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
                   title={label}
@@ -625,9 +576,7 @@ function TimelineWaveform({
                   <span
                     className={cn(
                       'min-w-0 truncate text-[10px] font-medium leading-none opacity-75',
-                      chunk.deleted
-                        ? 'text-aimu-coral line-through decoration-aimu-coral'
-                        : 'text-aimu-text-primary'
+                      'text-aimu-text-primary'
                     )}
                   >
                     {label}
@@ -635,19 +584,37 @@ function TimelineWaveform({
                 </div>
               );
             })}
-            <div
-              className="pointer-events-none absolute bottom-1 top-8 z-20 w-px bg-white shadow-[0_0_0_1px_rgba(245,108,108,0.65)]"
-              style={{ left: `${playheadPosition}px` }}
-            >
-              <div className="absolute -left-1.5 -top-1 h-3 w-3 rounded-full bg-aimu-coral" />
-            </div>
-            {isASRLoading && (
+            {duration > 0 && (
+              <div
+                className="pointer-events-none absolute bottom-1 top-8 z-20 w-px bg-white shadow-[0_0_0_1px_rgba(245,108,108,0.65)]"
+                style={{ left: `${playheadPosition}px` }}
+              >
+                <div className="absolute -left-1.5 -top-1 h-3 w-3 rounded-full bg-aimu-coral" />
+              </div>
+            )}
+            {(isASRLoading || isVideoProcessing) && (
               <div className="absolute inset-0 z-30 flex items-center justify-center bg-aimu-panel/70 backdrop-blur-[1px]">
-                <div className="flex items-center gap-2 rounded-full border border-aimu-border bg-aimu-panel px-3 py-1 text-[11px] text-aimu-coral shadow-sm">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  <span className="font-medium">{asrProgress?.data || t('messages.asr.asrStarted')}</span>
-                  {asrProgress?.progress !== undefined && (
-                    <span className="font-mono text-aimu-text-muted">· {Math.round(asrProgress.progress)}%</span>
+                <div className="flex flex-col items-center gap-2 rounded-lg border border-aimu-border bg-aimu-panel px-4 py-2 text-[11px] text-aimu-coral shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span className="font-medium">
+                      {isASRLoading
+                        ? (asrProgress?.data || t('messages.asr.asrStarted'))
+                        : (videoProgress?.message || t('components.workstation.exportProgress'))}
+                    </span>
+                    {(isASRLoading ? asrProgress?.progress : videoProgress?.progress) !== undefined && (
+                      <span className="font-mono text-aimu-text-muted">
+                        · {Math.round((isASRLoading ? asrProgress?.progress : videoProgress?.progress) ?? 0)}%
+                      </span>
+                    )}
+                  </div>
+                  {isVideoProcessing && videoProgress && (
+                    <div className="h-1.5 w-48 overflow-hidden rounded-full bg-aimu-border">
+                      <div
+                        className="h-full rounded-full bg-aimu-coral transition-all duration-300"
+                        style={{ width: `${videoProgress.progress}%` }}
+                      />
+                    </div>
                   )}
                 </div>
               </div>
@@ -720,15 +687,12 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
 
   const stage = useAppStore(state => state.stage);
   const videoFile = useAppStore(state => state.videoFile);
-  const shadow = useAppStore(state => state.shadow);
-  const setShadow = useAppStore(state => state.setShadow);
   const chunks = useChunks();
   const wordChunks = useWordChunks();
   const hasWordTimestamps = useHasWordTimestamps();
   const insertBlankChunks = useHistoryStore(state => state.insertBlankChunks);
   const smartCutSilenceThreshold = useAppStore(state => state.smartCutSilenceThreshold);
   const videoDuration = useAppStore(state => state.videoPlayerState.duration);
-  const setTranscript = useSetTranscript();
 
   // 内存使用情况状态 (Aimu 风格)
   const [memory, setMemory] = useState({ used: '42.63 MB', allocated: '54.17 MB', limit: '3.5 GB' });
@@ -850,14 +814,7 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
   );
 
   // Component is ready, render the main content
-
-  useEffect(() => {
-    // 仅在无视频文件时填充演示字幕，避免与真实 ASR 流程冲突
-    if (chunks.length === 0 && !useAppStore.getState().videoFile) {
-      setTranscript(mockTranscript);
-      useAppStore.getState().setStage('edit');
-    }
-  }, [chunks.length, setTranscript]);
+  // 初始状态为空：不再自动填充演示字幕，由「使用示例视频」按钮显式加载
 
   useEffect(() => {
     let cancelled = false;
@@ -938,7 +895,9 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
 
   // 视频处理相关状态
   const [isProcessing, setIsProcessing] = useState(false);
-  const [currentProcessingMessageId, setCurrentProcessingMessageId] = useState<string | null>(null);
+  const [videoProgress, setVideoProgress] = useState<VideoProcessingProgress | null>(null);
+  const processingMessageIdRef = useRef<string | null>(null);
+  const exportSaveTargetRef = useRef<VideoExportSaveTarget | null>(null);
   const [currentEngine, setCurrentEngine] = useState<VideoEngineType | null>(null);
   const processorRef = useRef<UnifiedVideoProcessor | null>(null);
 
@@ -947,8 +906,11 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
   const [exportDialogType, setExportDialogType] = useState<'subtitles' | 'video'>('video');
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // 字幕样式状态
-  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(() => defaultSubtitleStyle);
+  // 字幕样式状态：主/副字幕独立样式对，位置（底边距/比例）共享 primary
+  const [subtitleStylePair, setSubtitleStylePair] = useState<SubtitleStylePair>(() => defaultSubtitleStylePair);
+  // 显示模式（控制播放器预览），持久化在 appStore
+  const display = useAppStore(state => state.display);
+  const setDisplay = useAppStore(state => state.setDisplay);
 
   useEffect(() => {
     registerSubtitleFonts();
@@ -959,10 +921,17 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const [urlInput, setUrlInput] = useState('');
   const [isUrlLoading, setIsUrlLoading] = useState(false);
+  const [urlLoadProgress, setUrlLoadProgress] = useState<number | null>(null);
+  const [isFileLoading, setIsFileLoading] = useState(false);
+  const [fileLoadProgress, setFileLoadProgress] = useState<number | null>(null);
+  const [isSampleLoading, setIsSampleLoading] = useState(false);
+  const [sampleLoadProgress, setSampleLoadProgress] = useState<number | null>(null);
+
+  const isMediaLoading = isFileLoading || isSampleLoading || isUrlLoading;
 
   const timelineDuration = useMemo(() => {
     const chunkEndTime = chunks.reduce((maxTime, chunk) => Math.max(maxTime, chunk.timestamp[1]), 0);
-    return Math.max(videoFile?.duration || 0, chunkEndTime, mockTranscript.duration);
+    return Math.max(videoFile?.duration || 0, chunkEndTime);
   }, [chunks, videoFile?.duration]);
 
   const handleTimelineSeek = useCallback((time: number) => {
@@ -975,11 +944,13 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
   // const availableEngines = UnifiedVideoProcessor.getSupportedEngines();
 
   const handleProgress = useCallback((progressData: VideoProcessingProgress) => {
-    if (currentProcessingMessageId) {
-      updateVideoProcessingProgress(currentProcessingMessageId, progressData);
+    setVideoProgress(progressData);
+    const messageId = processingMessageIdRef.current;
+    if (messageId) {
+      updateVideoProcessingProgress(messageId, progressData);
     }
     onProgress?.(progressData.stage, progressData.progress);
-  }, [currentProcessingMessageId, updateVideoProcessingProgress, onProgress]);
+  }, [updateVideoProcessingProgress, onProgress]);
 
   const processVideo = useCallback(async (
     videoFile: VideoFile,
@@ -995,35 +966,65 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
 
     try {
       setIsProcessing(true);
+      setVideoProgress({
+        stage: 'analyzing',
+        progress: 0,
+        message: t('components.workstation.exportProgress'),
+      });
 
       // 开始视频处理消息
       messageId = startVideoProcessing(t('messages.fileUpload.processingFile'));
-      setCurrentProcessingMessageId(messageId);
+      processingMessageIdRef.current = messageId;
 
-      // 创建处理器（如果不存在）
+      // 创建/更新处理器进度回调
       if (!processorRef.current) {
         processorRef.current = new UnifiedVideoProcessor(handleProgress);
+      } else {
+        processorRef.current.setProgressCallback(handleProgress);
       }
+
+      const resolvedOptions: VideoProcessingOptions = {
+        quality: 'medium',
+        preserveAudio: true,
+        ...options,
+        outputPath: options?.outputPath ?? exportSaveTargetRef.current?.outputPath,
+      };
 
       // 初始化处理器（如果还没有初始化或需要切换引擎）
       const engineType = await processorRef.current.initialize(
         videoFile,
-        options?.engine || currentEngine || undefined
+        resolvedOptions.engine || currentEngine || undefined
       );
       setCurrentEngine(engineType);
 
       // 处理视频
-      const resultBlob = await processorRef.current.processVideo(segments, options || {
-        quality: 'medium',
-        preserveAudio: true
-      });
+      const resultBlob = await processorRef.current.processVideo(segments, resolvedOptions);
+
+      const saveTarget = exportSaveTargetRef.current;
+      const filename = saveTarget?.filename
+        ?? `cut_video_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, -1)}.${resolvedOptions.format || 'mp4'}`;
+
+      let savedPath: string | undefined;
+      if (saveTarget?.outputPath) {
+        savedPath = saveTarget.outputPath;
+      } else if (saveTarget) {
+        savedPath = await writeProcessedVideo(resultBlob, saveTarget);
+      }
 
       // 完成处理
       if (messageId) {
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -1);
-        const filename = `cut_video_${timestamp}.${options?.format || 'mp4'}`;
-        completeVideoProcessing(messageId, resultBlob, filename);
-        onVideoProcessed?.(resultBlob, filename);
+        const hasUsableBlob = resultBlob.size > 0;
+        completeVideoProcessing(
+          messageId,
+          hasUsableBlob ? resultBlob : null,
+          filename,
+          savedPath,
+        );
+        if (hasUsableBlob) {
+          onVideoProcessed?.(resultBlob, filename);
+        } else if (savedPath) {
+          onExportComplete?.(resultBlob, savedPath);
+        }
       }
 
     } catch (error) {
@@ -1041,35 +1042,45 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
       onError?.(error instanceof Error ? error : new Error('Unknown error'));
     } finally {
       setIsProcessing(false);
-      setCurrentProcessingMessageId(null);
+      setVideoProgress(null);
+      processingMessageIdRef.current = null;
+      exportSaveTargetRef.current = null;
     }
-  }, [isProcessing, currentEngine, startVideoProcessing, completeVideoProcessing, errorVideoProcessing, handleProgress, onVideoProcessed, onError, t]);
+  }, [isProcessing, currentEngine, startVideoProcessing, completeVideoProcessing, errorVideoProcessing, handleProgress, onVideoProcessed, onExportComplete, onError, t]);
 
 
   const [videoMeta, setVideoMeta] = useState({ width: 1920, height: 1080 });
 
   // 导出字幕
-  const handleExportSubtitles = useCallback(async (format: SubtitleExportFormat) => {
+  const handleExportSubtitles = useCallback(async (format: SubtitleExportFormat, exportMode: SubtitleDisplayMode) => {
     const keptChunks = chunks.filter(chunk => !chunk.deleted);
     if (keptChunks.length === 0) {
-      console.warn(t('messages.subtitle.emptySubtitleText'));
+      toast.error(t('messages.subtitle.emptySubtitleText'));
       return;
     }
 
-    const content = serializeSubtitleExport(format, keptChunks, {
-      ass: {
-        playResX: videoMeta.width,
-        playResY: videoMeta.height,
-        style: subtitleStyle,
-      },
-    });
+    try {
+      const content = serializeSubtitleExport(format, keptChunks, {
+        ass: {
+          playResX: videoMeta.width,
+          playResY: videoMeta.height,
+          stylePair: subtitleStylePair,
+          exportMode,
+        },
+        exportMode,
+      });
 
-    const filename = getExportFilename(format);
-    const types = getExportFileTypes(format);
-    const blob = new Blob([content], { type: getExportMimeType(format) });
-    await saveFile(blob, filename, types);
-    onExportComplete?.(blob, filename);
-  }, [chunks, videoMeta, subtitleStyle, onExportComplete, t]);
+      const filename = getExportFilename(format);
+      const types = getExportFileTypes(format);
+      const blob = new Blob([content], { type: getExportMimeType(format) });
+      await saveFile(blob, filename, types);
+      onExportComplete?.(blob, filename);
+    } catch (error) {
+      console.error('字幕导出失败:', error);
+      const detail = error instanceof Error ? error.message : t('common.error');
+      toast.error(t('messages.subtitle.exportFailed'), { description: detail });
+    }
+  }, [chunks, videoMeta, subtitleStylePair, onExportComplete, t]);
 
   const handleFileSelect = useCallback((selectedVideoFile: VideoFile) => {
     console.log('文件选择完成:', selectedVideoFile);
@@ -1083,16 +1094,67 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
     onFileSelected?.(selectedVideoFile);
   }, [onFileSelected]);
 
+  // 加载示例视频：拉取真实视频数据后走标准 ASR 流程（与手动上传一致），
+  // 由模型识别生成字幕，而不是显示 mock 内容。
+  const handleLoadSampleVideo = useCallback(async () => {
+    if (isSampleLoading) return;
+
+    useHistoryStore.getState().reset();
+    useAppStore.getState().clearASRProgress();
+    setIsSampleLoading(true);
+    setSampleLoadProgress(MEDIA_LOAD_PHASE.START);
+
+    try {
+      const { blob } = await fetchBlobWithProgress(demoVideoUrl, (loaded, total) => {
+        setSampleLoadProgress(calcDownloadProgress(loaded, total));
+      });
+      const file = new File([blob], 'demo.mp4', { type: 'video/mp4' });
+      const objectUrl = URL.createObjectURL(file);
+
+      setSampleLoadProgress(MEDIA_LOAD_PHASE.METADATA);
+      const duration = await new Promise<number>((resolve) => {
+        const probe = document.createElement('video');
+        probe.preload = 'metadata';
+        probe.onloadedmetadata = () => resolve(Number.isFinite(probe.duration) ? probe.duration : 0);
+        probe.onerror = () => resolve(0);
+        probe.src = objectUrl;
+      });
+
+      setSampleLoadProgress(MEDIA_LOAD_PHASE.FINALIZING);
+      const sampleVideoFile: VideoFile = {
+        file,
+        url: objectUrl,
+        size: blob.size,
+        type: 'video/mp4',
+        name: 'demo.mp4',
+        duration,
+      };
+      useAppStore.getState().setVideoFile(sampleVideoFile);
+      onFileSelected?.(sampleVideoFile);
+      setSampleLoadProgress(MEDIA_LOAD_PHASE.COMPLETE);
+    } catch (error) {
+      console.error('加载示例视频失败:', error);
+      toast.error(t('messages.asr.loadSampleFailed'));
+    } finally {
+      setIsSampleLoading(false);
+      setSampleLoadProgress(null);
+    }
+  }, [isSampleLoading, onFileSelected, t]);
+
   // Tauri 环境下通过原生文件选择器选择本地文件，拿到本地路径
   const handleTauriFileSelect = useCallback(async () => {
     const isTauri = '__TAURI_INTERNALS__' in window;
     if (!isTauri) return false;
+
+    setIsFileLoading(true);
+    setFileLoadProgress(MEDIA_LOAD_PHASE.START);
 
     try {
       const { invoke, convertFileSrc } = await import('@tauri-apps/api/core');
       const filePath = await invoke<string | null>('pick_media_file');
       if (!filePath) return true; // 用户取消
 
+      setFileLoadProgress(MEDIA_LOAD_PHASE.METADATA);
       const fileName = filePath.split(/[/\\]/).pop() || 'video';
       const ext = fileName.split('.').pop()?.toLowerCase() || '';
       const mimeMap: Record<string, string> = {
@@ -1111,11 +1173,16 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
         path: filePath,
       };
 
+      setFileLoadProgress(MEDIA_LOAD_PHASE.FINALIZING);
       handleFileSelect(selectedVideoFile);
+      setFileLoadProgress(MEDIA_LOAD_PHASE.COMPLETE);
       return true;
     } catch (err) {
       console.error('Tauri 文件选择失败:', err);
       return false;
+    } finally {
+      setIsFileLoading(false);
+      setFileLoadProgress(null);
     }
   }, [handleFileSelect]);
 
@@ -1130,16 +1197,41 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const selectedVideoFile: VideoFile = {
-      file,
-      url: URL.createObjectURL(file),
-      duration: 0,
-      size: file.size,
-      type: file.type,
-      name: file.name,
-    };
+    setIsFileLoading(true);
+    setFileLoadProgress(MEDIA_LOAD_PHASE.START);
 
-    handleFileSelect(selectedVideoFile);
+    try {
+      const objectUrl = URL.createObjectURL(file);
+      setFileLoadProgress(MEDIA_LOAD_PHASE.METADATA);
+
+      let duration = 0;
+      if (file.type.startsWith('video/') || file.type.startsWith('audio/')) {
+        duration = await new Promise<number>((resolve) => {
+          const probe = document.createElement(file.type.startsWith('video/') ? 'video' : 'audio');
+          probe.preload = 'metadata';
+          probe.onloadedmetadata = () => resolve(Number.isFinite(probe.duration) ? probe.duration : 0);
+          probe.onerror = () => resolve(0);
+          probe.src = objectUrl;
+        });
+      }
+
+      setFileLoadProgress(MEDIA_LOAD_PHASE.FINALIZING);
+      const selectedVideoFile: VideoFile = {
+        file,
+        url: objectUrl,
+        duration,
+        size: file.size,
+        type: file.type,
+        name: file.name,
+      };
+
+      handleFileSelect(selectedVideoFile);
+      setFileLoadProgress(MEDIA_LOAD_PHASE.COMPLETE);
+    } finally {
+      setIsFileLoading(false);
+      setFileLoadProgress(null);
+      event.target.value = '';
+    }
   }, [handleFileSelect]);
 
   // 点击上传按钮：Tauri 环境用原生对话框（直接拿文件路径），浏览器环境用 <input>
@@ -1157,9 +1249,14 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
     if (!url || isUrlLoading) return;
 
     setIsUrlLoading(true);
+    setUrlLoadProgress(MEDIA_LOAD_PHASE.START);
     try {
-      const selectedVideoFile = await loadMediaFromUrl(url);
+      const selectedVideoFile = await loadMediaFromUrl(url, (loaded, total) => {
+        setUrlLoadProgress(calcDownloadProgress(loaded, total));
+      });
+      setUrlLoadProgress(MEDIA_LOAD_PHASE.FINALIZING);
       handleFileSelect(selectedVideoFile);
+      setUrlLoadProgress(MEDIA_LOAD_PHASE.COMPLETE);
       setUrlInput('');
     } catch (error) {
       console.error('URL 加载失败:', error);
@@ -1168,21 +1265,14 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
       toast.error(errorMessage);
     } finally {
       setIsUrlLoading(false);
+      setUrlLoadProgress(null);
     }
   }, [urlInput, isUrlLoading, handleFileSelect, setError, t]);
 
-  // 从字幕生成视频片段 - 包含所有片段的删除状态和字幕信息
-  const videoSegments = useMemo((): VideoSegment[] => {
-    const cuttingChunks = getCuttingChunks(chunks, wordChunks, hasWordTimestamps);
-    return cuttingChunks.map(chunk => ({
-      start: chunk.timestamp[0],
-      end: chunk.timestamp[1],
-      keep: !chunk.deleted,
-      text: chunk.text,
-      secondText: chunk.secondText,
-      id: chunk.id
-    }));
-  }, [chunks, wordChunks, hasWordTimestamps]);
+  const subtitleExportChunks = useMemo(
+    () => chunks.filter((chunk) => !chunk.deleted),
+    [chunks],
+  );
 
   // 开始视频处理
   const handleStartProcessing = useCallback(async (options: VideoProcessingOptions) => {
@@ -1192,21 +1282,46 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
     }
 
     try {
-      await processVideo(videoFile, videoSegments, options);
+      const segments = buildVideoExportSegments({
+        chunks,
+        wordChunks,
+        hasWordTimestamps,
+        duration: timelineDuration,
+      });
+
+      await processVideo(videoFile, segments, {
+        ...options,
+        subtitleChunks: subtitleExportChunks,
+      });
     } catch (error) {
       console.error('视频处理失败:', error);
       console.error('App视频处理错误详情:', {
         videoFile: videoFile?.name,
-        segments: videoSegments?.length,
         error
       });
       setError(`${t('messages.export.exportFailed')}: ${error instanceof Error ? error.message : t('common.error')}`);
     }
-  }, [videoFile, videoSegments, processVideo, setError, t]);
+  }, [
+    videoFile,
+    chunks,
+    wordChunks,
+    hasWordTimestamps,
+    timelineDuration,
+    subtitleExportChunks,
+    processVideo,
+    setError,
+    t,
+  ]);
 
   // 打开视频导出对话框
   const handleOpenVideoExportDialog = useCallback(() => {
     setExportDialogType('video');
+    setExportDialogOpen(true);
+  }, []);
+
+  // 打开字幕导出对话框
+  const handleOpenSubtitleExportDialog = useCallback(() => {
+    setExportDialogType('subtitles');
     setExportDialogOpen(true);
   }, []);
 
@@ -1228,19 +1343,28 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
     });
   }, [chunks, smartCutSilenceThreshold, videoDuration, insertBlankChunks, t]);
 
-  // 处理视频导出配置
+  // 处理视频导出配置：先选择保存位置，再开始处理
   const handleVideoExport = useCallback(async (options: VideoExportOptions) => {
+    const format = options.format === 'mp4' ? 'mp4' : 'webm';
+    const saveTarget = await pickVideoExportSaveTarget(format, videoFile?.name);
+    if (!saveTarget) return;
+
+    exportSaveTargetRef.current = saveTarget;
+
     await handleStartProcessing({
-      format: options.format === 'mp4' ? 'mp4' : 'webm',
+      format,
       quality: options.quality,
       preserveAudio: true,
       subtitleProcessing: options.subtitleProcessing,
-      subtitleStyle: subtitleStyle,
+      subtitleStyle: subtitleStylePair.primary,
+      subtitleStylePair: subtitleStylePair,
+      subtitleExportMode: options.subtitleExportMode,
       videoWidth: videoMeta.width,
       videoHeight: videoMeta.height,
       engine: isTauriRuntime() ? 'ffmpeg-tauri' : undefined,
+      outputPath: saveTarget.outputPath,
     });
-  }, [handleStartProcessing, subtitleStyle, videoMeta]);
+  }, [handleStartProcessing, subtitleStylePair, videoMeta, videoFile?.name]);
 
   // 监听字幕变化并通知外部
   useEffect(() => {
@@ -1286,11 +1410,24 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
                 />
                 <button
                   onClick={handleUploadClick}
-                  className="flex w-full flex-col items-center justify-center rounded border border-dashed border-aimu-border bg-aimu-input px-3 py-4 text-center transition-colors hover:bg-aimu-hover"
+                  disabled={isMediaLoading}
+                  className="flex w-full flex-col items-center justify-center rounded border border-dashed border-aimu-border bg-aimu-input px-3 py-4 text-center transition-colors hover:bg-aimu-hover disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <Upload className="mb-2 h-5 w-5 text-aimu-text-muted" />
-                  <span className="text-xs font-medium text-aimu-text-primary">{t('components.workstation.dropFile')}</span>
-                  <span className="mt-1 text-[10px] leading-4 text-aimu-text-muted">{t('components.workstation.supportedFormatsShort')}</span>
+                  {isFileLoading ? (
+                    <>
+                      <Loader2 className="mb-2 h-5 w-5 animate-spin text-aimu-text-muted" />
+                      <span className="text-xs font-medium text-aimu-text-primary">
+                        {t('components.workstation.loadingMedia')}
+                        {fileLoadProgress !== null ? ` ${fileLoadProgress}%` : ''}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="mb-2 h-5 w-5 text-aimu-text-muted" />
+                      <span className="text-xs font-medium text-aimu-text-primary">{t('components.workstation.dropFile')}</span>
+                      <span className="mt-1 text-[10px] leading-4 text-aimu-text-muted">{t('components.workstation.supportedFormatsShort')}</span>
+                    </>
+                  )}
                 </button>
                 <div className="my-3 flex items-center gap-2">
                   <div className="h-px flex-1 bg-aimu-border" />
@@ -1321,18 +1458,73 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
                     data-testid="create-url-load"
                     onClick={() => void handleUrlLoad()}
                     disabled={!urlInput.trim() || isUrlLoading}
-                    className="flex h-8 shrink-0 items-center justify-center rounded border border-aimu-coral/35 bg-aimu-red-bg px-3 text-xs font-medium text-aimu-coral transition-colors hover:bg-aimu-coral/15 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex h-8 shrink-0 items-center justify-center gap-1.5 rounded border border-aimu-coral/35 bg-aimu-red-bg px-3 text-xs font-medium text-aimu-coral transition-colors hover:bg-aimu-coral/15 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {isUrlLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t('components.workstation.loadUrl')}
+                    {isUrlLoading ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <span>
+                          {t('components.workstation.loadingMedia')}
+                          {urlLoadProgress !== null ? ` ${urlLoadProgress}%` : ''}
+                        </span>
+                      </>
+                    ) : (
+                      t('components.workstation.loadUrl')
+                    )}
                   </button>
                 </div>
+                <button
+                  type="button"
+                  data-testid="create-sample-load"
+                  onClick={() => void handleLoadSampleVideo()}
+                  disabled={isSampleLoading || isUrlLoading}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded border border-aimu-coral/35 bg-aimu-red-bg px-3 py-2 text-xs font-medium text-aimu-coral transition-colors hover:bg-aimu-coral/15 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSampleLoading ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>
+                        {t('components.workstation.loadingSampleVideo')}
+                        {sampleLoadProgress !== null ? ` ${sampleLoadProgress}%` : ''}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-3.5 w-3.5" />
+                      {t('components.workstation.useSampleVideo')}
+                    </>
+                  )}
+                </button>
               </div>
             </div>
             
-            <button onClick={handleOpenVideoExportDialog} className="flex items-center space-x-1.5 text-sm font-medium hover:text-primary transition-colors">
-              <Download className="w-4 h-4" />
-              <span>{t('components.workstation.export')}</span>
-            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center space-x-1.5 text-sm font-medium hover:text-primary transition-colors">
+                  <Download className="w-4 h-4" />
+                  <span>{t('components.workstation.export')}</span>
+                  <ChevronDown className="w-3 h-3 opacity-70" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={handleOpenVideoExportDialog}
+                  disabled={!videoFile}
+                  className="flex items-center gap-2"
+                >
+                  <Video className="w-4 h-4" />
+                  <span>{t('components.workstation.exportVideo')}</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleOpenSubtitleExportDialog}
+                  disabled={chunks.length === 0}
+                  className="flex items-center gap-2"
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>{t('components.workstation.exportSubtitles')}</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             <button
               onClick={handleSmartCutBlank}
@@ -1405,19 +1597,73 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
                         videoUrl={videoFile.url}
                         className="w-full h-full"
                         onTimeUpdate={(time) => setCurrentTime(time)}
-                        subtitleStyle={subtitleStyle}
-                        onSubtitleStyleChange={setSubtitleStyle}
+                        primaryStyle={subtitleStylePair.primary}
+                        secondaryStyle={subtitleStylePair.secondary}
+                        displayMode={display}
+                        onPrimaryStyleChange={(s) => setSubtitleStylePair(prev => ({ ...prev, primary: s }))}
                         onVideoDimensionsChange={(dimensions) => {
                           setVideoMeta(dimensions);
                           const preset = inferAspectPreset(dimensions.width, dimensions.height);
-                          setSubtitleStyle((prev) => (
-                            prev.aspectPreset === preset ? prev : applyAspectPreset(prev, preset)
+                          // aspectPreset 仅作用于 primary（位置/比例共享）
+                          setSubtitleStylePair((prev) => (
+                            prev.primary.aspectPreset === preset
+                              ? prev
+                              : { ...prev, primary: applyAspectPreset(prev.primary, preset) }
                           ));
                         }}
                       />
                     </div>
                   ) : (
-                    <MockVideoPreview />
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-8">
+                      <button
+                        onClick={handleUploadClick}
+                        disabled={isMediaLoading}
+                        className="flex w-full max-w-md flex-col items-center justify-center rounded-lg border border-dashed border-aimu-border bg-aimu-panel px-6 py-10 text-center transition-colors hover:bg-aimu-hover disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isFileLoading ? (
+                          <>
+                            <Loader2 className="mb-3 h-10 w-10 animate-spin text-aimu-text-muted" />
+                            <span className="text-sm font-medium text-aimu-text-primary">
+                              {t('components.workstation.loadingMedia')}
+                              {fileLoadProgress !== null ? ` ${fileLoadProgress}%` : ''}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="mb-3 h-10 w-10 text-aimu-text-muted" />
+                            <span className="text-sm font-medium text-aimu-text-primary">
+                              {t('components.workstation.dropFile')}
+                            </span>
+                            <span className="mt-1 text-[11px] text-aimu-text-muted">
+                              {t('components.workstation.supportedFormatsShort')}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                      <div className="flex items-center gap-2 text-[11px] text-aimu-text-muted">
+                        <span>{t('components.workstation.orDivider')}</span>
+                      </div>
+                      <button
+                        onClick={() => void handleLoadSampleVideo()}
+                        disabled={isSampleLoading}
+                        className="flex items-center gap-2 rounded-md border border-aimu-coral/35 bg-aimu-red-bg px-4 py-2 text-sm font-medium text-aimu-coral transition-colors hover:bg-aimu-coral/15 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isSampleLoading ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span>
+                              {t('components.workstation.loadingSampleVideo')}
+                              {sampleLoadProgress !== null ? ` ${sampleLoadProgress}%` : ''}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <Play className="h-4 w-4" />
+                            {t('components.workstation.useSampleVideo')}
+                          </>
+                        )}
+                      </button>
+                    </div>
                   )}
                 </div>
 
@@ -1446,8 +1692,10 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
                     {activeTab === 'style' ? (
                       <div className="flex flex-col h-full">
                         <SubtitleSettings
-                          style={subtitleStyle}
-                          onStyleChange={setSubtitleStyle}
+                          stylePair={subtitleStylePair}
+                          onStylePairChange={setSubtitleStylePair}
+                          displayMode={display}
+                          onDisplayModeChange={setDisplay}
                         />
                       </div>
                     ) : activeTab === 'tools' ? (
@@ -1466,11 +1714,11 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
                 </div>
               </div>
 
-              {/* 右侧：字幕编辑器 (SubtitleList) - 占 50% 宽度 */}
+              {/* 右侧：字幕编辑器 (SubtitleEditorPanel) - 占 50% 宽度 */}
               <div className="flex-1 flex flex-col bg-background overflow-hidden">
                 <div className="flex-1 overflow-hidden flex flex-col">
                   <div className="flex-1 overflow-hidden">
-                    <SubtitleList
+                    <SubtitleEditorPanel
                       videoPlayerRef={videoPlayerRef}
                       isASRLoading={isASRLoading}
                       asrProgress={asrProgress}
@@ -1488,6 +1736,8 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
           onSeek={handleTimelineSeek}
           isASRLoading={isASRLoading}
           asrProgress={asrProgress}
+          isVideoProcessing={isProcessing}
+          videoProgress={videoProgress}
           mediaWaveformPeaks={mediaWaveformPeaks}
         />
 
@@ -1510,7 +1760,8 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
           open={exportDialogOpen}
           onOpenChange={setExportDialogOpen}
           exportType={exportDialogType}
-          onExportSubtitles={handleExportSubtitles}
+          defaultExportMode={display}
+          onExportSubtitles={(format, mode) => handleExportSubtitles(format, mode)}
           onExportVideo={handleVideoExport}
         />
 

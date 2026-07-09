@@ -1,8 +1,5 @@
 import { useCallback, useState } from 'react';
 import {
-  AlignCenter,
-  AlignLeft,
-  AlignRight,
   Ban,
   ChevronDown,
   ChevronUp,
@@ -17,6 +14,8 @@ import { useTranslation } from '@/contexts/LocaleProvider';
 import { SUBTITLE_FONTS } from '@/config/subtitleFonts';
 import {
   type SubtitleStyle,
+  type SubtitleStylePair,
+  type SubtitleDisplayMode,
   fontSizeAtReference,
   bottomOffsetAtReference,
   fontSizeRatioFromReference,
@@ -27,8 +26,11 @@ import {
 } from '@/subtitle';
 
 interface SubtitleSettingsProps {
-  style: SubtitleStyle;
-  onStyleChange: (style: SubtitleStyle) => void;
+  stylePair: SubtitleStylePair;
+  onStylePairChange: (pair: SubtitleStylePair) => void;
+  /** 显示模式（控制播放器预览），由 appStore 管理 */
+  displayMode?: SubtitleDisplayMode;
+  onDisplayModeChange?: (mode: SubtitleDisplayMode) => void;
   className?: string;
 }
 
@@ -218,7 +220,9 @@ function PresetButton({
       data-active={active}
       onClick={onClick}
       className="subtitle-preset-btn flex h-9 w-full items-center justify-center rounded-md border transition-colors"
-      style={preview.backgroundColor ? { backgroundColor: preview.backgroundColor } : undefined}
+      style={{
+        backgroundColor: preview.backgroundColor ?? undefined,
+      }}
     >
       {preview.showNone ? (
         <Ban className="h-4 w-4 text-aimu-text-muted" />
@@ -228,6 +232,10 @@ function PresetButton({
           style={{
             color: preview.textColor,
             WebkitTextStroke: preview.borderColor ? `1px ${preview.borderColor}` : undefined,
+            // 无描边纯色字时用轻微阴影保证在浅/深底上可辨
+            textShadow: !preview.borderColor && !preview.backgroundColor
+              ? '0 0 2px rgba(0,0,0,0.55)'
+              : undefined,
           }}
         >
           T
@@ -237,53 +245,99 @@ function PresetButton({
   );
 }
 
-function AimuSwitch({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      data-state={checked ? 'checked' : 'unchecked'}
-      onClick={() => onChange(!checked)}
-      className="subtitle-settings-switch relative inline-flex h-4 w-8 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none"
-    >
-      <span
-        className={cn(
-          'pointer-events-none block h-3 w-3 rounded-full bg-white shadow-sm transition-transform',
-          checked ? 'translate-x-4' : 'translate-x-0',
-        )}
-      />
-    </button>
-  );
-}
-
 export function SubtitleSettings({
-  style,
-  onStyleChange,
+  stylePair,
+  onStylePairChange,
+  displayMode = 'Bilingual',
+  onDisplayModeChange,
   className,
 }: SubtitleSettingsProps) {
   const { t } = useTranslation();
   const [positionOpen, setPositionOpen] = useState(true);
+  const [activeStyleTab, setActiveStyleTab] = useState<'primary' | 'secondary'>('primary');
 
-  const updateStyle = useCallback(
+  // 当前编辑的样式：primary 决定位置/比例，secondary 共享 primary 的位置
+  const activeStyle = activeStyleTab === 'primary' ? stylePair.primary : stylePair.secondary;
+  const isPrimaryTab = activeStyleTab === 'primary';
+
+  const updateActiveStyle = useCallback(
     (updates: Partial<SubtitleStyle>) => {
-      onStyleChange({ ...style, ...updates });
+      onStylePairChange({
+        ...stylePair,
+        [activeStyleTab]: { ...activeStyle, ...updates },
+      });
     },
-    [style, onStyleChange],
+    [stylePair, activeStyle, activeStyleTab, onStylePairChange],
   );
 
-  const fontSizeDisplay = fontSizeAtReference(style);
-  const bottomOffsetDisplay = bottomOffsetAtReference(style);
-  const activePreset = matchActiveStylePreset(style);
+  const fontSizeDisplay = fontSizeAtReference(activeStyle);
+  const bottomOffsetDisplay = bottomOffsetAtReference(stylePair.primary);
+  const activePreset = matchActiveStylePreset(activeStyle);
+
+  const displayModes: Array<{ id: SubtitleDisplayMode; label: string }> = [
+    { id: 'Bilingual', label: t('components.workstation.displayBilingual') },
+    { id: 'Main', label: t('components.workstation.displayMain') },
+    { id: 'Second', label: t('components.workstation.displaySecond') },
+  ];
 
   return (
     <div className={cn('space-y-2.5 text-xs text-aimu-text-primary', className)}>
+      {/* 显示模式选择器：控制播放器预览（双字幕/主字幕/副字幕） */}
+      {onDisplayModeChange && (
+        <div className="flex items-center gap-1.5">
+          <span className="w-14 shrink-0 text-xs text-aimu-text-secondary">
+            {t('components.workstation.display')}
+          </span>
+          <div className="flex flex-1 overflow-hidden rounded border border-aimu-border">
+            {displayModes.map((mode) => (
+              <button
+                key={mode.id}
+                type="button"
+                onClick={() => onDisplayModeChange(mode.id)}
+                className={cn(
+                  'flex-1 px-2 py-1 text-[11px] transition-colors',
+                  displayMode === mode.id
+                    ? 'bg-aimu-purple text-white'
+                    : 'bg-aimu-input text-aimu-text-secondary hover:bg-aimu-hover',
+                )}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="h-px bg-aimu-border" />
+
+      {/* 主/副字幕 Tab：始终显示两个 Tab，分别编辑各自样式 */}
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => setActiveStyleTab('primary')}
+          className={cn(
+            'flex-1 rounded px-2 py-1 text-[11px] font-medium transition-colors',
+            isPrimaryTab
+              ? 'bg-aimu-purple text-white'
+              : 'bg-aimu-input text-aimu-text-secondary hover:bg-aimu-hover',
+          )}
+        >
+          {t('components.workstation.primarySubtitleTab')}
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveStyleTab('secondary')}
+          className={cn(
+            'flex-1 rounded px-2 py-1 text-[11px] font-medium transition-colors',
+            !isPrimaryTab
+              ? 'bg-aimu-purple text-white'
+              : 'bg-aimu-input text-aimu-text-secondary hover:bg-aimu-hover',
+          )}
+        >
+          {t('components.workstation.secondarySubtitleTab')}
+        </button>
+      </div>
+
       <div className="space-y-1.5">
         <div className="text-xs font-medium text-aimu-text-secondary">
           {t('components.workstation.presetStyles')}
@@ -295,7 +349,7 @@ export function SubtitleSettings({
               active={activePreset === preset.id}
               label={preset.label}
               preview={preset.preview}
-              onClick={() => onStyleChange(applyStylePreset(style, preset.id))}
+              onClick={() => updateActiveStyle(applyStylePreset(activeStyle, preset.id))}
             />
           ))}
         </div>
@@ -304,7 +358,7 @@ export function SubtitleSettings({
       <div className="h-px bg-aimu-border" />
 
       <SettingRow label={t('components.workstation.font')}>
-        <Select value={style.fontId} onValueChange={(value) => updateStyle({ fontId: value })}>
+        <Select value={activeStyle.fontId} onValueChange={(value) => updateActiveStyle({ fontId: value })}>
           <SelectTrigger className="h-7 flex-1 border-aimu-border bg-aimu-input px-2 text-xs">
             <SelectValue />
           </SelectTrigger>
@@ -323,7 +377,7 @@ export function SubtitleSettings({
         value={fontSizeDisplay}
         min={18}
         max={72}
-        onChange={(value) => updateStyle({ fontSizeRatio: fontSizeRatioFromReference(value) })}
+        onChange={(value) => updateActiveStyle({ fontSizeRatio: fontSizeRatioFromReference(value) })}
       />
 
       <SettingRow label={t('components.workstation.textStyle')}>
@@ -332,12 +386,12 @@ export function SubtitleSettings({
           variant="outline"
           size="sm"
           value={[
-            ...(style.fontWeight === 'bold' ? ['bold'] : []),
-            ...(style.textDecoration === 'underline' ? ['underline'] : []),
-            ...(style.fontStyle === 'italic' ? ['italic'] : []),
+            ...(activeStyle.fontWeight === 'bold' ? ['bold'] : []),
+            ...(activeStyle.textDecoration === 'underline' ? ['underline'] : []),
+            ...(activeStyle.fontStyle === 'italic' ? ['italic'] : []),
           ]}
           onValueChange={(values) => {
-            updateStyle({
+            updateActiveStyle({
               fontWeight: values.includes('bold') ? 'bold' : 'normal',
               textDecoration: values.includes('underline') ? 'underline' : 'none',
               fontStyle: values.includes('italic') ? 'italic' : 'normal',
@@ -361,25 +415,25 @@ export function SubtitleSettings({
         <div className="grid flex-1 gap-2">
           <ColorControl
             label="字体"
-            value={style.color}
-            opacity={style.colorOpacity}
-            onChange={(value) => updateStyle({ color: value })}
-            onOpacityChange={(value) => updateStyle({ colorOpacity: value })}
+            value={activeStyle.color}
+            opacity={activeStyle.colorOpacity}
+            onChange={(value) => updateActiveStyle({ color: value })}
+            onOpacityChange={(value) => updateActiveStyle({ colorOpacity: value })}
           />
           <ColorControl
             label={t('components.workstation.outline')}
-            value={style.borderColor}
-            opacity={style.borderOpacity}
-            onChange={(value) => updateStyle({ borderColor: value, borderWidth: style.borderWidth || 2 })}
-            onOpacityChange={(value) => updateStyle({ borderOpacity: value, borderWidth: value === 0 ? 0 : style.borderWidth || 2 })}
+            value={activeStyle.borderColor}
+            opacity={activeStyle.borderOpacity}
+            onChange={(value) => updateActiveStyle({ borderColor: value, borderWidth: activeStyle.borderWidth || 2 })}
+            onOpacityChange={(value) => updateActiveStyle({ borderOpacity: value, borderWidth: value === 0 ? 0 : activeStyle.borderWidth || 2 })}
             allowNone
           />
           <ColorControl
             label={t('components.workstation.background')}
-            value={style.backgroundColor}
-            opacity={style.backgroundOpacity}
-            onChange={(value) => updateStyle({ backgroundColor: value })}
-            onOpacityChange={(value) => updateStyle({ backgroundOpacity: value })}
+            value={activeStyle.backgroundColor}
+            opacity={activeStyle.backgroundOpacity}
+            onChange={(value) => updateActiveStyle({ backgroundColor: value })}
+            onOpacityChange={(value) => updateActiveStyle({ backgroundOpacity: value })}
             allowNone
           />
         </div>
@@ -392,11 +446,11 @@ export function SubtitleSettings({
               {t('components.workstation.letterSpacing')}
             </span>
             <NumberInput
-              value={style.letterSpacing}
+              value={activeStyle.letterSpacing}
               min={0}
               max={10}
               step={0.5}
-              onChange={(value) => updateStyle({ letterSpacing: value })}
+              onChange={(value) => updateActiveStyle({ letterSpacing: value })}
               className="flex-1"
             />
           </div>
@@ -405,10 +459,10 @@ export function SubtitleSettings({
               {t('components.workstation.lineSpacing')}
             </span>
             <NumberInput
-              value={Math.round(style.lineHeight * 10)}
+              value={Math.round(activeStyle.lineHeight * 10)}
               min={8}
               max={30}
-              onChange={(value) => updateStyle({ lineHeight: value / 10 })}
+              onChange={(value) => updateActiveStyle({ lineHeight: value / 10 })}
               className="flex-1"
             />
           </div>
@@ -421,13 +475,25 @@ export function SubtitleSettings({
           {positionOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         </CollapsibleTrigger>
         <CollapsibleContent className="space-y-2 pt-1">
-          <SliderWithInput
-            label={t('components.workstation.bottomOffset')}
-            value={bottomOffsetDisplay}
-            min={0}
-            max={160}
-            onChange={(value) => updateStyle({ bottomOffsetRatio: bottomOffsetRatioFromReference(value) })}
-          />
+          <div className={cn(!isPrimaryTab && 'pointer-events-none opacity-50')}>
+            <SliderWithInput
+              label={t('components.workstation.bottomOffset')}
+              value={bottomOffsetDisplay}
+              min={0}
+              max={160}
+              onChange={(value) => {
+                // 底边距位置共享 primary：secondary Tab 下禁用，仅 primary 可调
+                if (isPrimaryTab) {
+                  updateActiveStyle({ bottomOffsetRatio: bottomOffsetRatioFromReference(value) });
+                }
+              }}
+            />
+          </div>
+          {!isPrimaryTab && (
+            <div className="text-[10px] text-aimu-text-muted">
+              {t('components.workstation.bottomOffsetLocked')}
+            </div>
+          )}
         </CollapsibleContent>
       </Collapsible>
     </div>

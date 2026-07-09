@@ -33,10 +33,24 @@ export class TransformersASREngine {
   private worker: Worker | null = null;
   private config: TransformersASREngineConfig = DEFAULT_TRANSFORMERS_ASR_CONFIG;
   private isModelLoaded = false;
-  private onProgress: ((progress: ASRProgress) => void) | null = null;
+  private progressCallbacks = new Set<(progress: ASRProgress) => void>();
 
   public setProgressCallback(callback: (progress: ASRProgress) => void) {
-    this.onProgress = callback;
+    this.progressCallbacks.clear();
+    this.progressCallbacks.add(callback);
+  }
+
+  public addProgressCallback(callback: (progress: ASRProgress) => void): () => void {
+    this.progressCallbacks.add(callback);
+    return () => {
+      this.progressCallbacks.delete(callback);
+    };
+  }
+
+  private emitProgress(progress: ASRProgress) {
+    for (const callback of this.progressCallbacks) {
+      callback(progress);
+    }
   }
 
   public setConfig(config: Partial<TransformersASREngineConfig>) {
@@ -77,6 +91,30 @@ export class TransformersASREngine {
 
   public isReady(): boolean {
     return this.isModelLoaded;
+  }
+
+  /**
+   * 仅下载模型到浏览器缓存，不改变当前引擎配置与已加载状态。
+   */
+  public async downloadModelWithConfig(config: TransformersASREngineConfig): Promise<void> {
+    const worker = this.getWorker();
+
+    return new Promise((resolve, reject) => {
+      const finish = this.listenOnce((progress) => {
+        if (progress.status === 'downloaded') {
+          finish();
+          resolve();
+        } else if (progress.status === 'error') {
+          finish();
+          reject(new Error(progress.error || '模型下载失败'));
+        }
+      });
+
+      worker.postMessage({
+        type: 'download',
+        data: { config },
+      });
+    });
   }
 
   public async loadModel(): Promise<void> {
@@ -130,7 +168,7 @@ export class TransformersASREngine {
 
   public destroy() {
     this.destroyWorker();
-    this.onProgress = null;
+    this.progressCallbacks.clear();
     this.isModelLoaded = false;
   }
 
@@ -139,12 +177,11 @@ export class TransformersASREngine {
       this.worker = new asrWorker();
 
       this.worker.onmessage = (event) => {
-        const progress = event.data as ASRProgress;
-        this.onProgress?.(progress);
+        this.emitProgress(event.data as ASRProgress);
       };
 
       this.worker.onerror = () => {
-        this.onProgress?.({
+        this.emitProgress({
           status: 'error',
           error: 'Worker 运行错误',
         });
@@ -162,15 +199,9 @@ export class TransformersASREngine {
   }
 
   private listenOnce(listener: (progress: ASRProgress) => void): () => void {
-    const originalCallback = this.onProgress;
-
-    this.onProgress = (progress) => {
-      originalCallback?.(progress);
-      listener(progress);
-    };
-
+    this.progressCallbacks.add(listener);
     return () => {
-      this.onProgress = originalCallback;
+      this.progressCallbacks.delete(listener);
     };
   }
 }

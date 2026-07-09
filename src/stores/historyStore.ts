@@ -66,6 +66,16 @@ interface HistoryActions {
   // 批量操作
   deleteSelected: (selectedIds: Set<string>) => void;
   restoreSelected: (selectedIds: Set<string>) => void;
+
+  /** 批量设置删除状态（原语言标注/删除模式确认时一次性应用，整批作为一次可撤销操作） */
+  setDeletedBatch: (updates: { id: string; deleted: boolean }[]) => void;
+
+  /** 原语言字词级编辑器确认：批量更新字词/空白并同步句子层 */
+  confirmOriginalEditorMarks: (plan: {
+    wordUpdates: { id: string; deleted: boolean }[];
+    blankInserts: { start: number; end: number }[];
+    blankUpdates: { id: string; deleted: boolean }[];
+  }) => void;
   
   // 编辑字幕文本
   updateChunkText: (chunkId: string, newText: string) => void;
@@ -128,10 +138,23 @@ const syncSentenceFromWords = (chunks: Chunk[], wordChunks: Chunk[], sentenceId:
     .filter((word): word is Chunk => Boolean(word));
   if (words.length === 0) return chunks;
 
-  const allDeleted = words.every((word) => word.deleted);
+  const activeWords = words.filter((word) => !word.deleted);
+  const allDeleted = activeWords.length === 0;
+  // 与 groupWordsIntoSentences 一致：字词直接拼接（中文无空格）
+  const text = allDeleted
+    ? sentence.text
+    : activeWords.map((word) => word.text).join('').trim() || sentence.text;
+  const timestamp: [number, number] = allDeleted
+    ? sentence.timestamp
+    : [
+      Math.min(...activeWords.map((word) => word.timestamp[0])),
+      Math.max(...activeWords.map((word) => word.timestamp[1])),
+    ];
 
   return chunks.map((chunk) =>
-    chunk.id === sentenceId ? { ...chunk, deleted: allDeleted } : chunk,
+    chunk.id === sentenceId
+      ? { ...chunk, deleted: allDeleted, text, timestamp }
+      : chunk,
   );
 };
 
@@ -460,92 +483,270 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
         });
       },
 
-      // 批量删除选中的chunks
+      // 批量删除选中的 chunks（有字词时间戳时级联到 wordChunks，保证导出裁剪与原语言删除线一致）
       deleteSelected: (selectedIds) => {
         const state = get();
-        const actions: UpdateAction[] = [];
-        const newChunks = [...state.chunks];
+        const batchUpdates: BatchUpdateAction['updates'] = [];
+        let newChunks = [...state.chunks];
+        let newWordChunks = [...state.wordChunks];
         const now = Date.now();
-        
-        // 为每个选中的chunk创建删除操作
+
         for (const id of selectedIds) {
-          const chunkIndex = newChunks.findIndex(c => c.id === id);
-          if (chunkIndex !== -1) {
-            const chunk = newChunks[chunkIndex];
-            if (!chunk.deleted) {
-              const action: UpdateAction = {
-                type: "update",
-                layer: 'sentence',
-                id,
-                prev: { deleted: chunk.deleted },
-                next: { deleted: true }
-              };
-              
-              newChunks[chunkIndex] = { ...chunk, deleted: true };
-              actions.push(action);
+          const chunkIndex = newChunks.findIndex((c) => c.id === id);
+          if (chunkIndex === -1) continue;
+          const chunk = newChunks[chunkIndex];
+          if (chunk.deleted) continue;
+
+          batchUpdates.push({
+            layer: 'sentence',
+            id,
+            prev: { deleted: chunk.deleted },
+            next: { deleted: true },
+          });
+          newChunks[chunkIndex] = { ...chunk, deleted: true };
+
+          if (state.hasWordTimestamps && chunk.wordIds?.length) {
+            for (const wordId of chunk.wordIds) {
+              const word = newWordChunks.find((item) => item.id === wordId);
+              if (!word || word.deleted) continue;
+              batchUpdates.push({
+                layer: 'word',
+                id: wordId,
+                prev: { deleted: word.deleted },
+                next: { deleted: true },
+              });
+              const applied = applyChunkUpdate(newChunks, newWordChunks, 'word', wordId, {
+                deleted: true,
+              });
+              newChunks = applied.chunks;
+              newWordChunks = applied.wordChunks;
             }
           }
         }
-        
-        if (actions.length > 0) {
-          // 重新计算衍生状态
-          const derived = computeDerivedState(newChunks);
-          
-          set({
-            chunks: newChunks,
-            undoStack: [...state.undoStack, ...actions],
-            redoStack: [],
-            lastUpdateTime: now,
-            text: derived.text,
-            duration: derived.duration,
-            canUndo: true,
-            canRedo: false,
-          });
-        }
+
+        if (batchUpdates.length === 0) return;
+
+        const derived = computeDerivedState(newChunks);
+        set({
+          chunks: newChunks,
+          wordChunks: newWordChunks,
+          undoStack: [...state.undoStack, { type: 'batch', updates: batchUpdates }],
+          redoStack: [],
+          lastUpdateTime: now,
+          text: derived.text,
+          duration: derived.duration,
+          canUndo: true,
+          canRedo: false,
+        });
       },
 
-      // 批量恢复选中的chunks
+      // 批量恢复选中的 chunks（同步恢复级联的 wordChunks）
       restoreSelected: (selectedIds) => {
         const state = get();
-        const actions: UpdateAction[] = [];
-        const newChunks = [...state.chunks];
+        const batchUpdates: BatchUpdateAction['updates'] = [];
+        let newChunks = [...state.chunks];
+        let newWordChunks = [...state.wordChunks];
         const now = Date.now();
-        
-        // 为每个选中的chunk创建恢复操作
+
         for (const id of selectedIds) {
-          const chunkIndex = newChunks.findIndex(c => c.id === id);
-          if (chunkIndex !== -1) {
-            const chunk = newChunks[chunkIndex];
-            if (chunk.deleted) {
-              const action: UpdateAction = {
-                type: "update",
-                layer: 'sentence',
-                id,
-                prev: { deleted: chunk.deleted },
-                next: { deleted: false }
-              };
-              
-              newChunks[chunkIndex] = { ...chunk, deleted: false };
-              actions.push(action);
+          const chunkIndex = newChunks.findIndex((c) => c.id === id);
+          if (chunkIndex === -1) continue;
+          const chunk = newChunks[chunkIndex];
+          if (!chunk.deleted) continue;
+
+          batchUpdates.push({
+            layer: 'sentence',
+            id,
+            prev: { deleted: chunk.deleted },
+            next: { deleted: false },
+          });
+          newChunks[chunkIndex] = { ...chunk, deleted: false };
+
+          if (state.hasWordTimestamps && chunk.wordIds?.length) {
+            for (const wordId of chunk.wordIds) {
+              const word = newWordChunks.find((item) => item.id === wordId);
+              if (!word || !word.deleted) continue;
+              batchUpdates.push({
+                layer: 'word',
+                id: wordId,
+                prev: { deleted: word.deleted },
+                next: { deleted: false },
+              });
+              const applied = applyChunkUpdate(newChunks, newWordChunks, 'word', wordId, {
+                deleted: false,
+              });
+              newChunks = applied.chunks;
+              newWordChunks = applied.wordChunks;
             }
           }
         }
-        
-        if (actions.length > 0) {
-          // 重新计算衍生状态
-          const derived = computeDerivedState(newChunks);
-          
-          set({
-            chunks: newChunks,
-            undoStack: [...state.undoStack, ...actions],
-            redoStack: [],
-            lastUpdateTime: now,
-            text: derived.text,
-            duration: derived.duration,
-            canUndo: true,
-            canRedo: false,
-          });
+
+        if (batchUpdates.length === 0) return;
+
+        const derived = computeDerivedState(newChunks);
+        set({
+          chunks: newChunks,
+          wordChunks: newWordChunks,
+          undoStack: [...state.undoStack, { type: 'batch', updates: batchUpdates }],
+          redoStack: [],
+          lastUpdateTime: now,
+          text: derived.text,
+          duration: derived.duration,
+          canUndo: true,
+          canRedo: false,
+        });
+      },
+
+      confirmOriginalEditorMarks: (plan) => {
+        const state = get();
+        if (
+          plan.wordUpdates.length === 0
+          && plan.blankInserts.length === 0
+          && plan.blankUpdates.length === 0
+        ) {
+          return;
         }
+
+        let newChunks = [...state.chunks];
+        let newWordChunks = [...state.wordChunks];
+        const batchUpdates: BatchUpdateAction['updates'] = [];
+        const insertedBlanks: Chunk[] = [];
+        const affectedSentenceIds = new Set<string>();
+
+        for (const update of plan.wordUpdates) {
+          const word = newWordChunks.find((item) => item.id === update.id);
+          if (!word || word.deleted === update.deleted) continue;
+          batchUpdates.push({
+            layer: 'word',
+            id: update.id,
+            prev: { deleted: word.deleted },
+            next: { deleted: update.deleted },
+          });
+          const applied = applyChunkUpdate(newChunks, newWordChunks, 'word', update.id, {
+            deleted: update.deleted,
+          });
+          newChunks = applied.chunks;
+          newWordChunks = applied.wordChunks;
+          if (word.sentenceId) affectedSentenceIds.add(word.sentenceId);
+        }
+
+        for (const update of plan.blankUpdates) {
+          const chunkIndex = newChunks.findIndex((chunk) => chunk.id === update.id);
+          if (chunkIndex === -1) continue;
+          const chunk = newChunks[chunkIndex];
+          if (chunk.deleted === update.deleted) continue;
+          batchUpdates.push({
+            layer: 'sentence',
+            id: update.id,
+            prev: { deleted: chunk.deleted },
+            next: { deleted: update.deleted },
+          });
+          newChunks[chunkIndex] = { ...chunk, deleted: update.deleted };
+        }
+
+        const existingIds = new Set(newChunks.map((chunk) => chunk.id));
+        for (const seg of plan.blankInserts) {
+          const id = `blank-${seg.start.toFixed(3)}-${seg.end.toFixed(3)}`;
+          if (existingIds.has(id)) continue;
+          const blankChunk: Chunk = {
+            id,
+            text: '',
+            timestamp: [seg.start, seg.end],
+            deleted: true,
+            isBlankSpacer: true,
+          };
+          insertedBlanks.push(blankChunk);
+          existingIds.add(id);
+        }
+
+        if (insertedBlanks.length > 0) {
+          newChunks = [...newChunks, ...insertedBlanks].sort(
+            (a, b) => a.timestamp[0] - b.timestamp[0],
+          );
+        }
+
+        for (const sentenceId of affectedSentenceIds) {
+          newChunks = syncSentenceFromWords(newChunks, newWordChunks, sentenceId);
+        }
+
+        const actions: HistoryAction[] = [];
+        if (batchUpdates.length > 0) {
+          actions.push({ type: 'batch', updates: batchUpdates });
+        }
+        if (insertedBlanks.length > 0) {
+          actions.push({ type: 'insert', chunks: insertedBlanks });
+        }
+        if (actions.length === 0) return;
+
+        const derived = computeDerivedState(newChunks);
+        set({
+          chunks: newChunks,
+          wordChunks: newWordChunks,
+          undoStack: [...state.undoStack, ...actions],
+          redoStack: [],
+          lastUpdateTime: Date.now(),
+          text: derived.text,
+          duration: derived.duration,
+          canUndo: true,
+          canRedo: false,
+        });
+      },
+
+      // 批量设置删除状态（句子级；有字词时级联到 wordChunks）
+      setDeletedBatch: (updates) => {
+        const state = get();
+        if (updates.length === 0) return;
+        let newChunks = [...state.chunks];
+        let newWordChunks = [...state.wordChunks];
+        const now = Date.now();
+        const batchUpdates: BatchUpdateAction['updates'] = [];
+
+        for (const u of updates) {
+          const chunkIndex = newChunks.findIndex(c => c.id === u.id);
+          if (chunkIndex === -1) continue;
+          const chunk = newChunks[chunkIndex];
+          if (chunk.isBlankSpacer) continue; // 空白占位段不参与标注/删除模式
+          if (chunk.deleted === u.deleted) continue;
+          const prev: Partial<Chunk> = { deleted: chunk.deleted };
+          const next: Partial<Chunk> = { deleted: u.deleted };
+          batchUpdates.push({ layer: 'sentence', id: u.id, prev, next });
+          newChunks[chunkIndex] = { ...chunk, deleted: u.deleted };
+
+          if (state.hasWordTimestamps && chunk.wordIds?.length) {
+            for (const wordId of chunk.wordIds) {
+              const word = newWordChunks.find((item) => item.id === wordId);
+              if (!word || word.deleted === u.deleted) continue;
+              batchUpdates.push({
+                layer: 'word',
+                id: wordId,
+                prev: { deleted: word.deleted },
+                next: { deleted: u.deleted },
+              });
+              const applied = applyChunkUpdate(newChunks, newWordChunks, 'word', wordId, {
+                deleted: u.deleted,
+              });
+              newChunks = applied.chunks;
+              newWordChunks = applied.wordChunks;
+            }
+          }
+        }
+
+        if (batchUpdates.length === 0) return;
+
+        const action: BatchUpdateAction = { type: "batch", updates: batchUpdates };
+        const derived = computeDerivedState(newChunks);
+
+        set({
+          chunks: newChunks,
+          wordChunks: newWordChunks,
+          undoStack: [...state.undoStack, action],
+          redoStack: [],
+          lastUpdateTime: now,
+          text: derived.text,
+          duration: derived.duration,
+          canUndo: true,
+          canRedo: false,
+        });
       },
 
       // 编辑字幕文本
@@ -702,6 +903,8 @@ export const useRedo = () => useHistoryStore(state => state.redo);
 export const useClearHistory = () => useHistoryStore(state => state.clearHistory);
 export const useDeleteSelected = () => useHistoryStore(state => state.deleteSelected);
 export const useRestoreSelected = () => useHistoryStore(state => state.restoreSelected);
+export const useSetDeletedBatch = () => useHistoryStore(state => state.setDeletedBatch);
+export const useConfirmOriginalEditorMarks = () => useHistoryStore(state => state.confirmOriginalEditorMarks);
 export const useUpdateChunkText = () => useHistoryStore(state => state.updateChunkText);
 export const useBatchUpdateText = () => useHistoryStore(state => state.batchUpdateText);
 export const useInsertBlankChunks = () => useHistoryStore(state => state.insertBlankChunks);

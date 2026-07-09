@@ -25,10 +25,13 @@ export interface SubtitleStyle {
 
   fontWeight: 'normal' | 'bold';
   fontStyle: 'normal' | 'italic';
+  textDecoration: 'none' | 'underline';
 
   color: string;
+  colorOpacity: number;
   backgroundColor: string;
   borderColor: string;
+  borderOpacity: number;
   shadowColor: string;
 
   textAlign: 'left' | 'center' | 'right';
@@ -55,10 +58,13 @@ export const defaultSubtitleStyle: SubtitleStyle = {
 
   fontWeight: 'bold',
   fontStyle: 'normal',
+  textDecoration: 'none',
 
   color: '#FFFFFF',
+  colorOpacity: 1,
   backgroundColor: '#000000',
   borderColor: '#000000',
+  borderOpacity: 1,
   shadowColor: '#000000',
 
   textAlign: 'center',
@@ -66,9 +72,9 @@ export const defaultSubtitleStyle: SubtitleStyle = {
   letterSpacing: 0,
 
   borderWidth: 1,
-  shadowOffsetX: 1,
-  shadowOffsetY: 1,
-  shadowBlur: 2,
+  shadowOffsetX: 0,
+  shadowOffsetY: 0,
+  shadowBlur: 0,
 
   backgroundOpacity: 0.8,
   backgroundRadius: 4,
@@ -125,6 +131,14 @@ export function migrateSubtitleStyle(
   },
 ): SubtitleStyle {
   const base = { ...defaultSubtitleStyle, ...legacy };
+
+  if (base.colorOpacity == null) {
+    base.colorOpacity = defaultSubtitleStyle.colorOpacity;
+  }
+
+  if (base.borderOpacity == null) {
+    base.borderOpacity = defaultSubtitleStyle.borderOpacity;
+  }
 
   if (legacy.fontSizeRatio == null && legacy.fontSize != null) {
     base.fontSizeRatio = legacy.fontSize / REFERENCE_VIDEO_HEIGHT;

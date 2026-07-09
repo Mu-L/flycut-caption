@@ -302,6 +302,13 @@ export interface FlyCutCaptionLocale {
       offset: string;
       bold: string;
       italic: string;
+      presetStyles: string;
+      fontSize: string;
+      textStyle: string;
+      color: string;
+      lineSpacing: string;
+      positionSize: string;
+      aspectPreset: string;
       correctSubtitle: string;
       correctStart: string;
       translateStart: string;

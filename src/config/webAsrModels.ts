@@ -82,6 +82,18 @@ export const WEB_ASR_MODELS: WebAsrModel[] = [
     description: '推荐：多语种支持好，浏览器本地可用，WASM/WebGPU 均可。',
   },
   {
+    id: 'whisper-large-v3-turbo',
+    name: 'Whisper Large v3 Turbo',
+    family: 'whisper',
+    modelId: 'onnx-community/whisper-large-v3-turbo',
+    languages: ['multi'],
+    recommended: false,
+    tokenTimestampVerified: true,
+    sizeHint: '~1.5GB (q8)',
+    description:
+      'Whisper Large v3 Turbo，Large v3 的推理加速版（解码层更少）。权重直连 HuggingFace（公开仓库），建议 WebGPU + 充足内存。',
+  },
+  {
     id: 'moonshine-tiny',
     name: 'Moonshine Tiny',
     family: 'moonshine',

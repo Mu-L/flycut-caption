@@ -48,13 +48,6 @@ import { loadMediaFromUrl } from '@/utils/fileUtils';
 import { AudioWaveform, Download, Eye, EyeOff, Github, Link2, Maximize2, Mic2, Play, Redo2, Scissors, Upload, Wand2, Keyboard, Undo2, ZoomIn, ZoomOut, Settings, Loader2 } from 'lucide-react';
 import { runSmartCutBlank } from '@/utils/smartCutBlank';
 import { toast } from 'sonner';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { SubtitleChunk } from '@/types/subtitle';
 import type { VideoFile, VideoSegment, VideoProcessingProgress } from '@/types/video';
 import type { VideoProcessingOptions, VideoEngineType } from '@/types/videoEngine';
@@ -62,8 +55,6 @@ import type { FlyCutCaptionProps } from './types';
 import { defaultConfig } from './types';
 
 type AimuTab = 'style' | 'tools' | 'options' | 'api';
-type ShadowSize = 'N' | 'S' | 'M' | 'L';
-
 
 interface BrowserPerformanceMemory {
   usedJSHeapSize: number;
@@ -957,17 +948,11 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // 字幕样式状态
-  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(() =>
-    applyShadowSize(defaultSubtitleStyle, shadow),
-  );
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(() => defaultSubtitleStyle);
 
   useEffect(() => {
     registerSubtitleFonts();
   }, []);
-
-  useEffect(() => {
-    setSubtitleStyle((prev) => applyShadowSize(prev, shadow));
-  }, [shadow]);
 
   // 视频播放器引用
   const videoPlayerRef = useRef<EnhancedVideoPlayerRef>(null);
@@ -1459,22 +1444,7 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
                   {/* Tab 内容 */}
                   <div className="flex-1 overflow-y-auto p-4">
                     {activeTab === 'style' ? (
-                      <div className="flex flex-col h-full space-y-4">
-                        <div className="flex items-center space-x-2 text-sm">
-                          <span className="text-muted-foreground font-medium">{t('components.workstation.shadow')}:</span>
-                          <Select value={shadow} onValueChange={(val) => setShadow(val as ShadowSize)}>
-                            <SelectTrigger className="h-8 w-16 bg-background">
-                              <SelectValue placeholder="N" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="N">N</SelectItem>
-                              <SelectItem value="S">S</SelectItem>
-                              <SelectItem value="M">M</SelectItem>
-                              <SelectItem value="L">L</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
+                      <div className="flex flex-col h-full">
                         <SubtitleSettings
                           style={subtitleStyle}
                           onStyleChange={setSubtitleStyle}

@@ -37,13 +37,14 @@ function chunkBody(chunk: SubtitleChunk): string {
 }
 
 /** #RRGGBB → ASS &HAABBGGRR */
-function hexToAssColor(hex: string): string {
+function hexToAssColor(hex: string, opacity = 1): string {
   const normalized = hex.replace('#', '');
   if (normalized.length !== 6) return '&H00FFFFFF';
+  const alpha = Math.round((1 - opacity) * 255).toString(16).padStart(2, '0');
   const r = normalized.slice(0, 2);
   const g = normalized.slice(2, 4);
   const b = normalized.slice(4, 6);
-  return `&H00${b}${g}${r}`.toUpperCase();
+  return `&H${alpha}${b}${g}${r}`.toUpperCase();
 }
 
 export function chunksToSrt(chunks: SubtitleChunk[]): string {
@@ -93,11 +94,12 @@ export function chunksToAss(chunks: SubtitleChunk[], options: AssExportOptions):
   const fontName = getStyleFontFamily(style).replace(/"/g, '');
   const fontSize = Math.round(playResY * style.fontSizeRatio);
   const marginV = Math.round(playResY * style.bottomOffsetRatio);
-  const primaryColour = hexToAssColor(style.color);
-  const outlineColour = hexToAssColor(style.borderColor);
-  const backColour = hexToAssColor(style.backgroundColor);
+  const primaryColour = hexToAssColor(style.color, style.colorOpacity);
+  const outlineColour = hexToAssColor(style.borderColor, style.borderOpacity);
+  const backColour = hexToAssColor(style.backgroundColor, style.backgroundOpacity);
   const bold = style.fontWeight === 'bold' ? -1 : 0;
   const italic = style.fontStyle === 'italic' ? -1 : 0;
+  const underline = style.textDecoration === 'underline' ? -1 : 0;
   const outline = style.borderWidth;
   const shadow = style.shadowBlur > 0 ? 1 : 0;
 
@@ -112,7 +114,7 @@ export function chunksToAss(chunks: SubtitleChunk[], options: AssExportOptions):
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    `Style: Default,${fontName},${fontSize},${primaryColour},&H000000FF,${outlineColour},${backColour},${bold},${italic},0,0,100,100,0,0,1,${outline},${shadow},2,20,20,${marginV},1`,
+    `Style: Default,${fontName},${fontSize},${primaryColour},&H000000FF,${outlineColour},${backColour},${bold},${italic},${underline},0,100,100,0,0,1,${outline},${shadow},2,20,20,${marginV},1`,
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',

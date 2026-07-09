@@ -36,7 +36,7 @@ export function resolveExportSubtitleMetrics(
 ) {
   const fontSize = resolveVideoFontSize(style, videoHeight);
   const bottomOffset = resolveBottomOffset(style, videoHeight);
-  const borderWidth = Math.max(1, Math.round(style.borderWidth * (videoHeight / 1080)));
+  const borderWidth = Math.max(0, Math.round(style.borderWidth * (videoHeight / 1080)));
   const letterSpacing = Math.round(style.letterSpacing * (videoHeight / 1080));
 
   const scale = videoHeight / 1080;

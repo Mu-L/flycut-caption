@@ -1,7 +1,18 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
+import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
+  Ban,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Slider } from '@/components/ui/slider';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useTranslation } from '@/contexts/LocaleProvider';
 import { SUBTITLE_FONTS } from '@/config/subtitleFonts';
 import {
@@ -10,10 +21,9 @@ import {
   bottomOffsetAtReference,
   fontSizeRatioFromReference,
   bottomOffsetRatioFromReference,
-  ASPECT_PRESETS,
   STYLE_PRESETS,
-  applyAspectPreset,
   applyStylePreset,
+  matchActiveStylePreset,
 } from '@/subtitle';
 
 interface SubtitleSettingsProps {
@@ -22,223 +32,404 @@ interface SubtitleSettingsProps {
   className?: string;
 }
 
-function AimuToggle({ checked, onChange, label }: { checked: boolean, onChange: (c: boolean) => void, label?: string }) {
+
+function SettingRow({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <div className="flex items-center gap-2">
-      {label && <span className="w-14 text-xs text-aimu-text-secondary shrink-0">{label}</span>}
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={() => onChange(!checked)}
-        className={cn(
-          "relative inline-flex h-4 w-8 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none",
-          checked ? "bg-aimu-coral" : "bg-aimu-text-muted"
-        )}
-      >
-        <span
-          className={cn(
-            "pointer-events-none flex h-3 w-3 items-center justify-center rounded-full bg-white shadow-sm transition-transform",
-            checked ? "translate-x-4" : "translate-x-0"
-          )}
-        >
-          <span className={cn("text-[8px] font-bold", checked ? "text-aimu-coral" : "text-aimu-text-muted")}>
-            {checked ? "Y" : "N"}
-          </span>
-        </span>
-      </button>
+    <div className={cn('flex items-center gap-2 min-h-7', className)}>
+      <span className="w-14 shrink-0 text-xs text-aimu-text-secondary">{label}</span>
+      <div className="flex min-w-0 flex-1 items-center gap-2">{children}</div>
     </div>
   );
 }
 
-function ColorBlock({ label, value, onChange }: { label: string, value: string, onChange: (v: string) => void }) {
+function NumberInput({
+  value,
+  min,
+  max,
+  step = 1,
+  onChange,
+  className,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onChange: (value: number) => void;
+  className?: string;
+}) {
+  const clamp = (next: number) => Math.min(max, Math.max(min, next));
+
   return (
-    <div className="flex flex-col items-center gap-1">
-      <div className="relative w-6 h-6 rounded-[2px] border border-aimu-border overflow-hidden cursor-pointer">
-        <input
-          type="color"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="absolute -top-2 -left-2 w-10 h-10 cursor-pointer opacity-0"
-        />
-        <div className="w-full h-full pointer-events-none" style={{ backgroundColor: value }} />
-      </div>
-      <span className="text-[10px] text-aimu-text-secondary whitespace-nowrap">{label}</span>
-    </div>
+    <Input
+      type="number"
+      value={value}
+      min={min}
+      max={max}
+      step={step}
+      onChange={(e) => {
+        const parsed = Number(e.target.value);
+        if (!Number.isNaN(parsed)) onChange(clamp(parsed));
+      }}
+      className={cn(
+        'h-6 w-12 shrink-0 border-aimu-border bg-aimu-input px-1.5 text-center text-[11px] text-aimu-text-primary [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
+        className,
+      )}
+    />
   );
 }
 
-function SliderRow({ label, value, min, max, onChange }: { label: string, value: number, min: number, max: number, onChange: (v: number) => void }) {
+function SliderWithInput({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
   return (
-    <div className="flex items-center gap-2 h-6">
-      <span className="w-14 text-xs text-aimu-text-secondary shrink-0">{label}</span>
+    <SettingRow label={label}>
       <Slider
         value={[value]}
         min={min}
         max={max}
         step={1}
-        onValueChange={([v]) => onChange(v)}
+        onValueChange={([next]) => onChange(next)}
         className="aimu-slider flex-1 [&_[data-slot=slider-track]]:h-1"
       />
-      <span className="w-6 text-[11px] text-aimu-text-secondary text-right shrink-0">{value}</span>
+      <NumberInput value={value} min={min} max={max} onChange={onChange} />
+    </SettingRow>
+  );
+}
+
+function normalizeHexColor(value: string): string {
+  const normalized = value.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(normalized)) return normalized.toUpperCase();
+  return '#FFFFFF';
+}
+
+function rgbaPreview(color: string, opacity: number): string {
+  const hex = normalizeHexColor(color).replace('#', '');
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+}
+
+function ColorControl({
+  label,
+  value,
+  opacity,
+  onChange,
+  onOpacityChange,
+  allowNone = false,
+}: {
+  label: string;
+  value: string;
+  opacity: number;
+  onChange: (value: string) => void;
+  onOpacityChange: (value: number) => void;
+  allowNone?: boolean;
+}) {
+  const disabled = allowNone && opacity === 0;
+
+  return (
+    <div className="space-y-1.5 rounded border border-aimu-border bg-aimu-input p-2">
+      <div className="flex items-center gap-2">
+        <span className="w-10 shrink-0 text-[10px] text-aimu-text-muted">{label}</span>
+        <label className="relative h-7 w-9 shrink-0 cursor-pointer overflow-hidden rounded border border-aimu-border subtitle-alpha-bg">
+          <input
+            type="color"
+            value={normalizeHexColor(value)}
+            onChange={(e) => {
+              onChange(e.target.value.toUpperCase());
+              if (disabled) onOpacityChange(1);
+            }}
+            className="absolute -left-2 -top-2 h-12 w-12 cursor-pointer opacity-0"
+          />
+          <span className="block h-full w-full" style={{ backgroundColor: rgbaPreview(value, opacity) }} />
+        </label>
+        <Input
+          value={normalizeHexColor(value)}
+          onChange={(e) => onChange(normalizeHexColor(e.target.value))}
+          className="h-7 flex-1 border-aimu-border bg-aimu-panel px-2 text-[11px] text-aimu-text-primary"
+        />
+        {allowNone && (
+          <button
+            type="button"
+            data-active={disabled}
+            onClick={() => onOpacityChange(disabled ? 1 : 0)}
+            className="subtitle-none-color h-7 w-9 shrink-0 rounded border border-aimu-border text-[10px] text-aimu-text-muted transition-colors"
+          >
+            无
+          </button>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="w-10 shrink-0 text-[10px] text-aimu-text-muted">透明</span>
+        <Slider
+          value={[Math.round(opacity * 100)]}
+          min={0}
+          max={100}
+          step={1}
+          onValueChange={([next]) => onOpacityChange(next / 100)}
+          className="aimu-slider flex-1 [&_[data-slot=slider-track]]:h-1"
+        />
+        <NumberInput
+          value={Math.round(opacity * 100)}
+          min={0}
+          max={100}
+          onChange={(next) => onOpacityChange(next / 100)}
+        />
+      </div>
     </div>
+  );
+}
+
+const toggleGroupClass = 'subtitle-settings-toggle h-7 border-aimu-border';
+
+function PresetButton({
+  active,
+  onClick,
+  preview,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  preview: (typeof STYLE_PRESETS)[number]['preview'];
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      data-active={active}
+      onClick={onClick}
+      className="subtitle-preset-btn flex h-9 w-full items-center justify-center rounded-md border transition-colors"
+      style={preview.backgroundColor ? { backgroundColor: preview.backgroundColor } : undefined}
+    >
+      {preview.showNone ? (
+        <Ban className="h-4 w-4 text-aimu-text-muted" />
+      ) : (
+        <span
+          className="text-lg font-bold leading-none"
+          style={{
+            color: preview.textColor,
+            WebkitTextStroke: preview.borderColor ? `1px ${preview.borderColor}` : undefined,
+          }}
+        >
+          T
+        </span>
+      )}
+    </button>
+  );
+}
+
+function AimuSwitch({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      data-state={checked ? 'checked' : 'unchecked'}
+      onClick={() => onChange(!checked)}
+      className="subtitle-settings-switch relative inline-flex h-4 w-8 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none"
+    >
+      <span
+        className={cn(
+          'pointer-events-none block h-3 w-3 rounded-full bg-white shadow-sm transition-transform',
+          checked ? 'translate-x-4' : 'translate-x-0',
+        )}
+      />
+    </button>
   );
 }
 
 export function SubtitleSettings({
   style,
   onStyleChange,
-  className
+  className,
 }: SubtitleSettingsProps) {
   const { t } = useTranslation();
-  const updateStyle = useCallback((updates: Partial<SubtitleStyle>) => {
-    onStyleChange({ ...style, ...updates });
-  }, [style, onStyleChange]);
+  const [positionOpen, setPositionOpen] = useState(true);
+
+  const updateStyle = useCallback(
+    (updates: Partial<SubtitleStyle>) => {
+      onStyleChange({ ...style, ...updates });
+    },
+    [style, onStyleChange],
+  );
 
   const fontSizeDisplay = fontSizeAtReference(style);
   const bottomOffsetDisplay = bottomOffsetAtReference(style);
+  const activePreset = matchActiveStylePreset(style);
 
   return (
-    <div className={cn("bg-transparent text-aimu-text-primary text-xs p-3 space-y-3", className)}>
-      <div className="flex items-start gap-2">
-        <div className="w-12 font-bold mt-1 shrink-0">{t('components.workstation.colors')}:</div>
-        <div className="flex gap-4">
-          <ColorBlock label={t('components.workstation.primaryColor')} value={style.color} onChange={(v) => updateStyle({ color: v })} />
-          <ColorBlock label={t('components.workstation.primaryOutline')} value={style.borderColor} onChange={(v) => updateStyle({ borderColor: v })} />
-          <ColorBlock label={t('components.workstation.secondaryColor')} value={style.backgroundColor} onChange={(v) => updateStyle({ backgroundColor: v })} />
-          <ColorBlock label={t('components.workstation.secondaryOutline')} value={style.shadowColor} onChange={(v) => updateStyle({ shadowColor: v })} />
+    <div className={cn('space-y-2.5 text-xs text-aimu-text-primary', className)}>
+      <div className="space-y-1.5">
+        <div className="text-xs font-medium text-aimu-text-secondary">
+          {t('components.workstation.presetStyles')}
+        </div>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(2.25rem,1fr))] gap-1.5 sm:grid-cols-[repeat(auto-fit,minmax(3.25rem,1fr))]">
+          {STYLE_PRESETS.map((preset) => (
+            <PresetButton
+              key={preset.id}
+              active={activePreset === preset.id}
+              label={preset.label}
+              preview={preset.preview}
+              onClick={() => onStyleChange(applyStylePreset(style, preset.id))}
+            />
+          ))}
         </div>
       </div>
 
-      <div className="flex items-start gap-2">
-        <div className="w-12 font-bold mt-1 shrink-0">{t('components.workstation.sizes')}:</div>
-        <div className="flex-1 space-y-1.5">
-          <SliderRow
-            label={t('components.subtitleEditor.fontSize')}
-            value={fontSizeDisplay}
-            min={18}
-            max={72}
-            onChange={(v) => updateStyle({ fontSizeRatio: fontSizeRatioFromReference(v) })}
+      <div className="h-px bg-aimu-border" />
+
+      <SettingRow label={t('components.workstation.font')}>
+        <Select value={style.fontId} onValueChange={(value) => updateStyle({ fontId: value })}>
+          <SelectTrigger className="h-7 flex-1 border-aimu-border bg-aimu-input px-2 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SUBTITLE_FONTS.map((font) => (
+              <SelectItem key={font.id} value={font.id} className="text-xs">
+                <span style={{ fontFamily: font.family }}>{font.label}</span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </SettingRow>
+
+      <SliderWithInput
+        label={t('components.workstation.fontSize')}
+        value={fontSizeDisplay}
+        min={18}
+        max={72}
+        onChange={(value) => updateStyle({ fontSizeRatio: fontSizeRatioFromReference(value) })}
+      />
+
+      <SettingRow label={t('components.workstation.textStyle')}>
+        <ToggleGroup
+          type="multiple"
+          variant="outline"
+          size="sm"
+          value={[
+            ...(style.fontWeight === 'bold' ? ['bold'] : []),
+            ...(style.textDecoration === 'underline' ? ['underline'] : []),
+            ...(style.fontStyle === 'italic' ? ['italic'] : []),
+          ]}
+          onValueChange={(values) => {
+            updateStyle({
+              fontWeight: values.includes('bold') ? 'bold' : 'normal',
+              textDecoration: values.includes('underline') ? 'underline' : 'none',
+              fontStyle: values.includes('italic') ? 'italic' : 'normal',
+            });
+          }}
+          className={toggleGroupClass}
+        >
+          <ToggleGroupItem value="bold" className="h-7 w-8 px-0 text-xs font-bold">
+            B
+          </ToggleGroupItem>
+          <ToggleGroupItem value="underline" className="h-7 w-8 px-0 text-xs underline underline-offset-2">
+            U
+          </ToggleGroupItem>
+          <ToggleGroupItem value="italic" className="h-7 w-8 px-0 text-xs italic">
+            I
+          </ToggleGroupItem>
+        </ToggleGroup>
+      </SettingRow>
+
+      <SettingRow label={t('components.workstation.color')} className="items-start">
+        <div className="grid flex-1 gap-2">
+          <ColorControl
+            label="字体"
+            value={style.color}
+            opacity={style.colorOpacity}
+            onChange={(value) => updateStyle({ color: value })}
+            onOpacityChange={(value) => updateStyle({ colorOpacity: value })}
           />
-          <SliderRow label={t('components.workstation.letterSpacing')} value={style.letterSpacing} min={0} max={5} onChange={(v) => updateStyle({ letterSpacing: v })} />
-          <SliderRow
+          <ColorControl
+            label={t('components.workstation.outline')}
+            value={style.borderColor}
+            opacity={style.borderOpacity}
+            onChange={(value) => updateStyle({ borderColor: value, borderWidth: style.borderWidth || 2 })}
+            onOpacityChange={(value) => updateStyle({ borderOpacity: value, borderWidth: value === 0 ? 0 : style.borderWidth || 2 })}
+            allowNone
+          />
+          <ColorControl
+            label={t('components.workstation.background')}
+            value={style.backgroundColor}
+            opacity={style.backgroundOpacity}
+            onChange={(value) => updateStyle({ backgroundColor: value })}
+            onOpacityChange={(value) => updateStyle({ backgroundOpacity: value })}
+            allowNone
+          />
+        </div>
+      </SettingRow>
+
+      <SettingRow label="">
+        <div className="flex flex-1 gap-2">
+          <div className="flex flex-1 items-center gap-1.5">
+            <span className="w-10 shrink-0 text-[10px] text-aimu-text-muted">
+              {t('components.workstation.letterSpacing')}
+            </span>
+            <NumberInput
+              value={style.letterSpacing}
+              min={0}
+              max={10}
+              step={0.5}
+              onChange={(value) => updateStyle({ letterSpacing: value })}
+              className="flex-1"
+            />
+          </div>
+          <div className="flex flex-1 items-center gap-1.5">
+            <span className="w-10 shrink-0 text-[10px] text-aimu-text-muted">
+              {t('components.workstation.lineSpacing')}
+            </span>
+            <NumberInput
+              value={Math.round(style.lineHeight * 10)}
+              min={8}
+              max={30}
+              onChange={(value) => updateStyle({ lineHeight: value / 10 })}
+              className="flex-1"
+            />
+          </div>
+        </div>
+      </SettingRow>
+
+      <Collapsible open={positionOpen} onOpenChange={setPositionOpen}>
+        <CollapsibleTrigger className="flex w-full items-center justify-between py-1 text-xs text-aimu-text-secondary hover:text-aimu-text-primary">
+          <span>{t('components.workstation.positionSize')}</span>
+          {positionOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        </CollapsibleTrigger>
+        <CollapsibleContent className="space-y-2 pt-1">
+          <SliderWithInput
             label={t('components.workstation.bottomOffset')}
             value={bottomOffsetDisplay}
             min={0}
             max={160}
-            onChange={(v) => updateStyle({ bottomOffsetRatio: bottomOffsetRatioFromReference(v) })}
+            onChange={(value) => updateStyle({ bottomOffsetRatio: bottomOffsetRatioFromReference(value) })}
           />
-        </div>
-      </div>
-
-      <div className="flex items-start gap-2">
-        <div className="w-12 font-bold mt-1 shrink-0">{t('components.subtitleEditor.shadow')}:</div>
-        <div className="flex-1 space-y-1.5">
-          <div className="flex items-center h-6">
-            <AimuToggle
-              label={t('components.workstation.background')}
-              checked={style.backgroundOpacity > 0}
-              onChange={(c) => updateStyle({ backgroundOpacity: c ? 0.8 : 0 })}
-            />
-          </div>
-          <SliderRow
-            label={t('components.workstation.opacity')}
-            value={Math.round(style.backgroundOpacity * 250)}
-            min={0}
-            max={250}
-            onChange={(v) => updateStyle({ backgroundOpacity: v / 250 })}
-          />
-          <SliderRow
-            label={t('components.workstation.outline')}
-            value={style.borderWidth}
-            min={1}
-            max={3}
-            onChange={(v) => updateStyle({ borderWidth: v })}
-          />
-          <SliderRow
-            label={t('components.workstation.offset')}
-            value={style.shadowOffsetX}
-            min={0}
-            max={3}
-            onChange={(v) => updateStyle({ shadowOffsetX: v, shadowOffsetY: v })}
-          />
-        </div>
-      </div>
-
-      <div className="flex items-start gap-2">
-        <div className="w-12 font-bold mt-1 shrink-0">预设:</div>
-        <div className="flex-1 flex flex-col gap-2">
-          <Select
-            value={style.aspectPreset}
-            onValueChange={(v) => onStyleChange(applyAspectPreset(style, v as SubtitleStyle['aspectPreset']))}
-          >
-            <SelectTrigger className="h-7 text-xs px-2 py-0 bg-aimu-input border-aimu-border w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {ASPECT_PRESETS.map((preset) => (
-                <SelectItem key={preset.id} value={preset.id} className="text-xs">
-                  {preset.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            onValueChange={(v) => onStyleChange(applyStylePreset(style, v as typeof STYLE_PRESETS[number]['id']))}
-          >
-            <SelectTrigger className="h-7 text-xs px-2 py-0 bg-aimu-input border-aimu-border w-full">
-              <SelectValue placeholder="应用样式预设…" />
-            </SelectTrigger>
-            <SelectContent>
-              {STYLE_PRESETS.map((preset) => (
-                <SelectItem key={preset.id} value={preset.id} className="text-xs">
-                  {preset.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <div className="flex items-start gap-2">
-        <div className="w-12 font-bold mt-1 shrink-0">{t('components.workstation.font')}:</div>
-        <div className="flex-1 flex flex-col gap-2">
-          <Select value={style.fontId} onValueChange={(v) => updateStyle({ fontId: v })}>
-            <SelectTrigger className="h-7 text-xs px-2 py-0 bg-aimu-input border-aimu-border w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {SUBTITLE_FONTS.map((font) => (
-                <SelectItem key={font.id} value={font.id} className="text-xs">
-                  <span className="flex items-center gap-1.5">
-                    <span style={{ fontFamily: font.family }}>{font.label}</span>
-                    {font.recommended && (
-                      <span className="text-[10px] px-1 py-0.5 rounded bg-primary/10 text-primary font-medium">
-                        推荐
-                      </span>
-                    )}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-[10px] text-aimu-text-muted leading-snug">
-            字号按 1080p 参考显示；不同分辨率视频自动保持相同画面比例。
-          </p>
-          <div className="flex items-center gap-4 mt-1">
-            <AimuToggle
-              label={t('components.workstation.bold')}
-              checked={style.fontWeight === 'bold'}
-              onChange={(c) => updateStyle({ fontWeight: c ? 'bold' : 'normal' })}
-            />
-            <AimuToggle
-              label={t('components.workstation.italic')}
-              checked={style.fontStyle === 'italic'}
-              onChange={(c) => updateStyle({ fontStyle: c ? 'italic' : 'normal' })}
-            />
-          </div>
-        </div>
-      </div>
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   );
 }

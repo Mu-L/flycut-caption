@@ -1,8 +1,39 @@
 import type { SubtitleStyle } from './subtitleStyle';
-import { DEFAULT_BOTTOM_OFFSET_RATIO } from './subtitleStyle';
+import { DEFAULT_BOTTOM_OFFSET_RATIO, defaultSubtitleStyle } from './subtitleStyle';
 
 export type AspectPreset = 'landscape' | 'portrait_9_16' | 'square_1_1';
-export type StylePresetId = 'classic' | 'boxed' | 'minimal';
+export type StylePresetId =
+  | 'none'
+  | 'white-black'
+  | 'white-outline'
+  | 'yellow-black'
+  | 'red-white'
+  | 'blue-black'
+  | 'pink-white'
+  | 'cyan-white'
+  | 'lime-black'
+  | 'gray-blue'
+  | 'red-white-bold'
+  | 'brown-white'
+  | 'cream-brown'
+  | 'rose-white'
+  | 'black-white'
+  | 'white-plain'
+  | 'yellow-plain'
+  | 'red-plain'
+  | 'green-plain'
+  | 'blue-white'
+  | 'pink-plain'
+  | 'peach-plain'
+  | 'orange-red'
+  | 'green-black';
+
+export interface StylePresetPreview {
+  textColor: string;
+  backgroundColor?: string;
+  borderColor?: string;
+  showNone?: boolean;
+}
 
 export interface AspectPresetConfig {
   id: AspectPreset;
@@ -32,52 +63,204 @@ export const ASPECT_PRESETS: AspectPresetConfig[] = [
   },
 ];
 
+const BASE_TEXT_PRESET: Partial<SubtitleStyle> = {
+  backgroundOpacity: 0,
+  shadowBlur: 0,
+  shadowOffsetX: 0,
+  shadowOffsetY: 0,
+  fontWeight: 'bold',
+  fontStyle: 'normal',
+  textDecoration: 'none',
+};
+
 export const STYLE_PRESETS: Array<{
   id: StylePresetId;
   label: string;
   patch: Partial<SubtitleStyle>;
+  preview: StylePresetPreview;
 }> = [
   {
-    id: 'classic',
-    label: '经典白字黑边',
+    id: 'none',
+    label: '无样式',
     patch: {
-      color: '#FFFFFF',
-      borderColor: '#000000',
-      borderWidth: 2,
-      backgroundOpacity: 0,
-      shadowBlur: 2,
-      shadowOffsetX: 1,
-      shadowOffsetY: 1,
-      fontWeight: 'bold',
-    },
-  },
-  {
-    id: 'boxed',
-    label: '黑底白字',
-    patch: {
-      color: '#FFFFFF',
-      backgroundColor: '#000000',
-      backgroundOpacity: 0.8,
+      ...BASE_TEXT_PRESET,
+      color: defaultSubtitleStyle.color,
+      borderColor: defaultSubtitleStyle.borderColor,
       borderWidth: 0,
-      shadowBlur: 0,
-      fontWeight: 'bold',
-    },
-  },
-  {
-    id: 'minimal',
-    label: '简约无描边',
-    patch: {
-      color: '#FFFFFF',
-      borderWidth: 0,
-      backgroundOpacity: 0,
-      shadowBlur: 3,
-      shadowOffsetX: 1,
-      shadowOffsetY: 1,
-      shadowColor: '#000000',
       fontWeight: 'normal',
     },
+    preview: { textColor: '#8d9095', showNone: true },
+  },
+  {
+    id: 'white-black',
+    label: '白字黑边',
+    patch: { ...BASE_TEXT_PRESET, color: '#FFFFFF', borderColor: '#000000', borderWidth: 2 },
+    preview: { textColor: '#FFFFFF', borderColor: '#000000' },
+  },
+  {
+    id: 'white-outline',
+    label: '白字描边',
+    patch: { ...BASE_TEXT_PRESET, color: '#FFFFFF', borderColor: '#111111', borderWidth: 1 },
+    preview: { textColor: '#FFFFFF', borderColor: '#111111' },
+  },
+  {
+    id: 'yellow-black',
+    label: '黄字黑边',
+    patch: { ...BASE_TEXT_PRESET, color: '#FFE100', borderColor: '#000000', borderWidth: 2 },
+    preview: { textColor: '#FFE100', borderColor: '#000000' },
+  },
+  {
+    id: 'red-white',
+    label: '红字白边',
+    patch: { ...BASE_TEXT_PRESET, color: '#FF5B57', borderColor: '#FFFFFF', borderWidth: 2 },
+    preview: { textColor: '#FF5B57', borderColor: '#FFFFFF' },
+  },
+  {
+    id: 'blue-black',
+    label: '蓝灰字黑边',
+    patch: { ...BASE_TEXT_PRESET, color: '#B7C9D6', borderColor: '#000000', borderWidth: 2 },
+    preview: { textColor: '#B7C9D6', borderColor: '#000000' },
+  },
+  {
+    id: 'pink-white',
+    label: '粉字白边',
+    patch: { ...BASE_TEXT_PRESET, color: '#FF4F9A', borderColor: '#FFFFFF', borderWidth: 2 },
+    preview: { textColor: '#FF4F9A', borderColor: '#FFFFFF' },
+  },
+  {
+    id: 'cyan-white',
+    label: '蓝字白边',
+    patch: { ...BASE_TEXT_PRESET, color: '#2298FF', borderColor: '#FFFFFF', borderWidth: 2 },
+    preview: { textColor: '#2298FF', borderColor: '#FFFFFF' },
+  },
+  {
+    id: 'lime-black',
+    label: '绿字黑边',
+    patch: { ...BASE_TEXT_PRESET, color: '#91B727', borderColor: '#000000', borderWidth: 2 },
+    preview: { textColor: '#91B727', borderColor: '#000000' },
+  },
+  {
+    id: 'gray-blue',
+    label: '灰字蓝边',
+    patch: { ...BASE_TEXT_PRESET, color: '#7894A8', borderColor: '#23495E', borderWidth: 2 },
+    preview: { textColor: '#7894A8', borderColor: '#23495E' },
+  },
+  {
+    id: 'red-white-bold',
+    label: '红字白边',
+    patch: { ...BASE_TEXT_PRESET, color: '#FF1735', borderColor: '#FFFFFF', borderWidth: 2 },
+    preview: { textColor: '#FF1735', borderColor: '#FFFFFF' },
+  },
+  {
+    id: 'brown-white',
+    label: '棕字白边',
+    patch: { ...BASE_TEXT_PRESET, color: '#8A4B3F', borderColor: '#FFFFFF', borderWidth: 2 },
+    preview: { textColor: '#8A4B3F', borderColor: '#FFFFFF' },
+  },
+  {
+    id: 'cream-brown',
+    label: '米字棕边',
+    patch: { ...BASE_TEXT_PRESET, color: '#FFE7A6', borderColor: '#7B5333', borderWidth: 2 },
+    preview: { textColor: '#FFE7A6', borderColor: '#7B5333' },
+  },
+  {
+    id: 'rose-white',
+    label: '玫红白边',
+    patch: { ...BASE_TEXT_PRESET, color: '#E65E69', borderColor: '#FFFFFF', borderWidth: 2 },
+    preview: { textColor: '#E65E69', borderColor: '#FFFFFF' },
+  },
+  {
+    id: 'black-white',
+    label: '黑字白边',
+    patch: { ...BASE_TEXT_PRESET, color: '#000000', borderColor: '#FFFFFF', borderWidth: 2 },
+    preview: { textColor: '#FFFFFF', backgroundColor: '#000000' },
+  },
+  {
+    id: 'white-plain',
+    label: '纯白字',
+    patch: { ...BASE_TEXT_PRESET, color: '#FFFFFF', borderColor: '#000000', borderWidth: 0 },
+    preview: { textColor: '#000000', backgroundColor: '#FFFFFF' },
+  },
+  {
+    id: 'yellow-plain',
+    label: '纯黄字',
+    patch: { ...BASE_TEXT_PRESET, color: '#FFE100', borderColor: '#000000', borderWidth: 0 },
+    preview: { textColor: '#000000', backgroundColor: '#FFE100' },
+  },
+  {
+    id: 'red-plain',
+    label: '红底白字',
+    patch: { ...BASE_TEXT_PRESET, color: '#FFFFFF', backgroundColor: '#B8505C', backgroundOpacity: 0.85, borderWidth: 0 },
+    preview: { textColor: '#FFFFFF', backgroundColor: '#B8505C' },
+  },
+  {
+    id: 'green-plain',
+    label: '绿字黑边',
+    patch: { ...BASE_TEXT_PRESET, color: '#62F69C', borderColor: '#000000', borderWidth: 2 },
+    preview: { textColor: '#62F69C', backgroundColor: '#000000' },
+  },
+  {
+    id: 'blue-white',
+    label: '蓝字白边',
+    patch: { ...BASE_TEXT_PRESET, color: '#4A92D9', borderColor: '#FFFFFF', borderWidth: 2 },
+    preview: { textColor: '#FFFFFF', backgroundColor: '#4A92D9' },
+  },
+  {
+    id: 'pink-plain',
+    label: '粉字白边',
+    patch: { ...BASE_TEXT_PRESET, color: '#F0538C', borderColor: '#FFFFFF', borderWidth: 2 },
+    preview: { textColor: '#FFFFFF', backgroundColor: '#F0538C' },
+  },
+  {
+    id: 'peach-plain',
+    label: '米字粉边',
+    patch: { ...BASE_TEXT_PRESET, color: '#FFEAC0', borderColor: '#D56F78', borderWidth: 2 },
+    preview: { textColor: '#FFEAC0', backgroundColor: '#2a2a32' },
+  },
+  {
+    id: 'orange-red',
+    label: '橙字红边',
+    patch: { ...BASE_TEXT_PRESET, color: '#FF9D20', borderColor: '#FF2734', borderWidth: 2 },
+    preview: { textColor: '#FF9D20', backgroundColor: '#2a2a32', borderColor: '#FF2734' },
+  },
+  {
+    id: 'green-black',
+    label: '绿字黑边',
+    patch: { ...BASE_TEXT_PRESET, color: '#16F06A', borderColor: '#000000', borderWidth: 2 },
+    preview: { textColor: '#16F06A', backgroundColor: '#2a2a32', borderColor: '#000000' },
   },
 ];
+
+const PRESET_MATCH_KEYS: Array<keyof SubtitleStyle> = [
+  'color',
+  'colorOpacity',
+  'backgroundColor',
+  'borderColor',
+  'borderOpacity',
+  'borderWidth',
+  'backgroundOpacity',
+  'shadowBlur',
+  'shadowOffsetX',
+  'shadowOffsetY',
+  'fontWeight',
+  'fontStyle',
+  'textDecoration',
+];
+
+function styleMatchesPreset(style: SubtitleStyle, presetId: StylePresetId): boolean {
+  const preset = STYLE_PRESETS.find((p) => p.id === presetId);
+  if (!preset) return false;
+  return PRESET_MATCH_KEYS.every((key) => {
+    const expected = preset.patch[key];
+    if (expected === undefined) return true;
+    return style[key] === expected;
+  });
+}
+
+export function matchActiveStylePreset(style: SubtitleStyle): StylePresetId | null {
+  const match = STYLE_PRESETS.find((preset) => styleMatchesPreset(style, preset.id));
+  return match?.id ?? null;
+}
 
 export function getAspectPresetConfig(preset: AspectPreset): AspectPresetConfig {
   return ASPECT_PRESETS.find((p) => p.id === preset) ?? ASPECT_PRESETS[0];

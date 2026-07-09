@@ -37,6 +37,7 @@ export {
   STYLE_PRESETS,
   applyAspectPreset,
   applyStylePreset,
+  matchActiveStylePreset,
   inferAspectPreset,
   getMaxWidthRatio,
 } from './subtitlePresets';

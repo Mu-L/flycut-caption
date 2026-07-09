@@ -73,6 +73,7 @@
   --aimu-slider-handle-border: #e85555;
   --aimu-toggle-on: #e85555;
   --aimu-toggle-off: #d0d0d6;
+  --aimu-preset-preview-bg: #f2f2f4;
 
   /* Chart colors */
   --chart-1: #e85555;
@@ -154,6 +155,7 @@
   --aimu-slider-handle-border: #f56c6c;
   --aimu-toggle-on: #f56c6c;
   --aimu-toggle-off: #39393a;
+  --aimu-preset-preview-bg: #1a1a1e;
 
   /* Chart colors */
   --chart-1: #f56c6c;
@@ -221,6 +223,8 @@
   --color-aimu-purple: var(--aimu-accent-purple);
   --color-aimu-purple-bg: var(--aimu-accent-purple-bg);
   --color-aimu-red-bg: var(--aimu-accent-red-bg);
+  --color-aimu-toggle-off: var(--aimu-toggle-off);
+  --color-aimu-preset-preview: var(--aimu-preset-preview-bg);
 }
 
 html {
@@ -419,4 +423,61 @@ body {
 .font-aimu {
   font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", Arial, sans-serif;
+}
+
+/* === Subtitle settings (light/dark aware) === */
+.subtitle-preset-btn {
+  background-color: var(--aimu-preset-preview-bg);
+  border-color: var(--aimu-border);
+}
+
+.subtitle-preset-btn:hover {
+  border-color: var(--aimu-text-muted);
+}
+
+.subtitle-preset-btn[data-active="true"] {
+  border-color: var(--aimu-accent-coral);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--aimu-accent-coral) 55%, transparent);
+}
+
+.subtitle-settings-toggle [data-slot="toggle-group-item"] {
+  border-color: var(--aimu-border);
+  background: var(--aimu-bg-input);
+  color: var(--aimu-text-secondary);
+}
+
+.subtitle-settings-toggle [data-slot="toggle-group-item"]:hover {
+  background: var(--aimu-bg-hover);
+  color: var(--aimu-text-primary);
+}
+
+.subtitle-settings-toggle [data-slot="toggle-group-item"][data-state="on"] {
+  background: var(--aimu-accent-purple-bg);
+  color: var(--aimu-accent-purple);
+  border-color: color-mix(in oklab, var(--aimu-accent-purple) 35%, var(--aimu-border));
+}
+
+.subtitle-none-color:hover,
+.subtitle-none-color[data-active="true"] {
+  background: var(--aimu-bg-hover);
+  color: var(--aimu-text-primary);
+}
+
+.subtitle-alpha-bg {
+  background-color: #fff;
+  background-image:
+    linear-gradient(45deg, #c9c9cf 25%, transparent 25%),
+    linear-gradient(-45deg, #c9c9cf 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #c9c9cf 75%),
+    linear-gradient(-45deg, transparent 75%, #c9c9cf 75%);
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+  background-size: 12px 12px;
+}
+
+.subtitle-settings-switch[data-state="checked"] {
+  background: var(--aimu-toggle-on);
+}
+
+.subtitle-settings-switch[data-state="unchecked"] {
+  background: var(--aimu-toggle-off);
 }

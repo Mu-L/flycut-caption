@@ -93,15 +93,32 @@ function drawTextLine(
 
   const scaledBorderWidth = scaleMetric(style.borderWidth);
   if (scaledBorderWidth > 0) {
-    ctx.strokeStyle = style.borderColor;
+    ctx.strokeStyle = `${style.borderColor}${Math.round(style.borderOpacity * 255).toString(16).padStart(2, '0')}`;
     ctx.lineWidth = scaledBorderWidth;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeText(line, textX, y);
   }
 
-  ctx.fillStyle = style.color;
+  ctx.fillStyle = `${style.color}${Math.round(style.colorOpacity * 255).toString(16).padStart(2, '0')}`;
   ctx.fillText(line, textX, y);
+
+  if (style.textDecoration === 'underline') {
+    const textMetrics = ctx.measureText(line);
+    const underlineY = y + displayFontSize * 0.08;
+    const underlineWidth = Math.max(1, displayFontSize * 0.06);
+    let startX = textX - textMetrics.width / 2;
+    if (style.textAlign === 'left') startX = textX;
+    if (style.textAlign === 'right') startX = textX - textMetrics.width;
+
+    ctx.shadowColor = 'transparent';
+    ctx.lineWidth = underlineWidth;
+    ctx.strokeStyle = `${style.color}${Math.round(style.colorOpacity * 255).toString(16).padStart(2, '0')}`;
+    ctx.beginPath();
+    ctx.moveTo(startX, underlineY);
+    ctx.lineTo(startX + textMetrics.width, underlineY);
+    ctx.stroke();
+  }
 }
 
 /**

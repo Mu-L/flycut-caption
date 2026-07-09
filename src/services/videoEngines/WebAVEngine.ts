@@ -451,11 +451,13 @@ export class WebAVEngine implements IVideoProcessingEngine {
           fontFamily: metrics.fontFamily,
           fontWeight: metrics.fontWeight,
           fontStyle: metrics.fontStyle,
-          color: effectiveStyle.color,
+          color: `${effectiveStyle.color}${Math.round(effectiveStyle.colorOpacity * 255).toString(16).padStart(2, '0')}`,
           textBgColor: effectiveStyle.backgroundOpacity > 0
             ? `${effectiveStyle.backgroundColor}${Math.round(effectiveStyle.backgroundOpacity * 255).toString(16).padStart(2, '0')}`
             : undefined,
-          strokeStyle: metrics.borderWidth > 0 ? effectiveStyle.borderColor : undefined,
+          strokeStyle: metrics.borderWidth > 0 && effectiveStyle.borderOpacity > 0
+            ? `${effectiveStyle.borderColor}${Math.round(effectiveStyle.borderOpacity * 255).toString(16).padStart(2, '0')}`
+            : undefined,
           lineWidth: metrics.borderWidth,
           lineJoin: 'round',
           lineCap: 'round',

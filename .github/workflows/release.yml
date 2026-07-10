@@ -17,12 +17,9 @@ jobs:
       fail-fast: false # 单个平台失败不影响其他平台继续构建
       matrix:
         include:
-          # macOS arm64（Apple Silicon runner）
+          # macOS arm64（Apple Silicon）
           - os: macos-14
             label: macos-arm64
-          # macOS x86_64（Intel runner）
-          - os: macos-13
-            label: macos-x86_64
           # Windows x86_64
           - os: windows-latest
             label: windows-x86_64

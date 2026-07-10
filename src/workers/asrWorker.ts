@@ -2,10 +2,14 @@
 // 生成句子级别时间戳，适合字幕编辑
 
 import { env, pipeline } from '@huggingface/transformers';
-import type { ASRProgress, SubtitleTranscript } from '../types/subtitle';
+import type { ASRProgress, ASRProgressPurpose, SubtitleTranscript } from '../types/subtitle';
 import { isValidLanguageCode } from '../constants/languages';
 import type { TransformersASREngineConfig } from '../services/asrEngines/TransformersASREngine';
 import { logAsrModelOutput } from '../utils/asrOutputLog';
+
+function withPurpose(progress: ASRProgress, purpose: ASRProgressPurpose): ASRProgress {
+  return { ...progress, purpose };
+}
 
 // 本 worker 通过 `?worker&inline` 内联为 blob URL 运行。
 // onnxruntime-web 的 WebGPU 后端会用相对路径动态 import 胶水模块
@@ -119,14 +123,27 @@ function resolveModelFileUrl(url: string): string | null {
   return filePath ? `${activeConfig.modelBaseUrl}/${filePath}` : null;
 }
 
-// 重写 fetch 函数以从 OSS 加载文件
+// 重写 fetch：优先走 OSS 镜像；镜像缺失（404/非 2xx）时回退 HuggingFace 原地址。
+// 否则 transformers.js 会先得到 "Could not locate file"，再被 pipeline 的
+// AutoModelForCTC 兜底误报成 "Unsupported model type: whisper"。
 globalThis.fetch = async function(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
 
   const modelFileUrl = url ? resolveModelFileUrl(url) : null;
   if (modelFileUrl) {
     console.log(`🔄 重定向模型文件: ${url} -> ${modelFileUrl}`);
-    return originalFetch(modelFileUrl, init);
+    try {
+      const mirrored = await originalFetch(modelFileUrl, init);
+      if (mirrored.ok) {
+        return mirrored;
+      }
+      console.warn(
+        `⚠️ OSS 镜像不可用 (${mirrored.status})，回退 HuggingFace: ${url}`,
+      );
+    } catch (err) {
+      console.warn(`⚠️ OSS 镜像请求失败，回退 HuggingFace: ${url}`, err);
+    }
+    return originalFetch(input, init);
   }
 
   // 其他请求使用原始 fetch
@@ -138,6 +155,11 @@ globalThis.fetch = async function(input: RequestInfo | URL, init?: RequestInit):
 // Moonshine 包含 preprocessor/encoder/uncached_decoder/cached_decoder，
 // 默认权重本身就是 int8 量化版本，直接用 'q8' 在 WASM 下最稳，
 // WebGPU 暂时不显式指定 dtype，由 transformers.js 自行决策。
+//
+// Whisper dtype 说明（对齐自建 OSS 实际文件）：
+// - OSS 目前只有 encoder_model.onnx (fp32) + decoder_model_merged_{quantized,q4}.onnx
+// - 没有 encoder_model_quantized.onnx；若全局 dtype='q8' 会 404，
+//   最终被 pipeline 误报为 "Unsupported model type: whisper"
 function buildPipelineOptions(config: TransformersASREngineConfig, progress_callback?: (progress: unknown) => void) {
   const base: Record<string, unknown> = { progress_callback };
 
@@ -150,13 +172,21 @@ function buildPipelineOptions(config: TransformersASREngineConfig, progress_call
     return base;
   }
 
-  // 默认 whisper
+  // Whisper
   if (config.device === 'webgpu') {
+    // WebGPU 官方示例路径：encoder fp32 + decoder q4
     base.dtype = {
       encoder_model: 'fp32',
       decoder_model_merged: 'q4',
     };
+  } else if (config.modelBaseUrl) {
+    // 自建 OSS 目前缺 encoder_model_quantized.onnx，不能全局 dtype='q8'
+    base.dtype = {
+      encoder_model: 'fp32',
+      decoder_model_merged: 'q8',
+    };
   } else {
+    // 直连 HuggingFace 时完整 q8 体积更小
     base.dtype = 'q8';
   }
   base.device = config.device;
@@ -202,32 +232,32 @@ async function downloadModelOnly({ config }: { config: TransformersASREngineConf
   resetFilesLoading();
   console.log('ASR Worker开始下载模型:', config);
 
-  self.postMessage({
+  self.postMessage(withPurpose({
     status: 'loading',
     data: `正在下载模型 (${config.family})...`,
     progress: 0,
-  } satisfies ASRProgress);
+  }, 'download'));
 
   try {
     await PipelineSingleton.getInstance(config, (progress) => {
       const normalized = normalizeHubProgress(progress as HubProgressInfo);
       if (normalized) {
-        self.postMessage(normalized);
+        self.postMessage(withPurpose(normalized, 'download'));
       }
     });
 
     console.log('ASR模型下载完成');
-    self.postMessage({
+    self.postMessage(withPurpose({
       status: 'downloaded',
       data: '模型下载完成',
       progress: 100,
-    } satisfies ASRProgress);
+    }, 'download'));
   } catch (error) {
     console.error('ASR模型下载失败:', error);
-    self.postMessage({
+    self.postMessage(withPurpose({
       status: 'error',
-      error: error instanceof Error ? error.message : '模型下载失败',
-    } satisfies ASRProgress);
+      error: formatAsrLoadError(error, '模型下载失败'),
+    }, 'download'));
   }
 }
 
@@ -239,11 +269,11 @@ async function load({ config }: { config: TransformersASREngineConfig }) {
   resetFilesLoading();
   console.log('ASR Worker开始加载模型:', config);
   
-  self.postMessage({
+  self.postMessage(withPurpose({
     status: 'loading',
     data: `正在加载模型 (${config.family} / ${config.device})...`,
     progress: 0,
-  } satisfies ASRProgress);
+  }, 'load'));
 
   try {
     // 加载管道并保存以供将来使用
@@ -251,16 +281,16 @@ async function load({ config }: { config: TransformersASREngineConfig }) {
       const normalized = normalizeHubProgress(progress as HubProgressInfo);
       console.log('ASR模型加载进度:', progress, normalized);
       if (normalized) {
-        self.postMessage(normalized);
+        self.postMessage(withPurpose(normalized, 'load'));
       }
     });
 
     // WebGPU 需要预热（仅 whisper 系列传入 language 选项）
     if (config.device === 'webgpu') {
-      self.postMessage({
+      self.postMessage(withPurpose({
         status: 'loading',
         data: '正在编译着色器并预热模型...',
-      } satisfies ASRProgress);
+      }, 'load'));
 
       const warmupOpts: Record<string, unknown> = {};
       if (config.family === 'whisper') {
@@ -270,14 +300,14 @@ async function load({ config }: { config: TransformersASREngineConfig }) {
     }
 
     console.log('ASR模型加载完成');
-    self.postMessage({ status: 'loaded' } satisfies ASRProgress);
+    self.postMessage(withPurpose({ status: 'loaded' }, 'load'));
     
   } catch (error) {
     console.error('ASR模型加载失败:', error);
-    self.postMessage({
+    self.postMessage(withPurpose({
       status: 'error',
-      error: error instanceof Error ? error.message : '模型加载失败',
-    } satisfies ASRProgress);
+      error: formatAsrLoadError(error, '模型加载失败'),
+    }, 'load'));
   }
 }
 
@@ -295,10 +325,10 @@ async function run({ audio, language }: { audio: Float32Array; language: string 
     const transcriber = await PipelineSingleton.getInstance(activeConfig);
     const start = performance.now();
 
-    self.postMessage({
+    self.postMessage(withPurpose({
       status: 'running',
       data: `正在进行语音识别 (${activeConfig.family})...`,
-    } satisfies ASRProgress);
+    }, 'transcribe'));
 
     // 确保语言代码正确；Moonshine 仅支持英文，强制 'en'
     let validLanguage = isValidLanguageCode(language) ? language : 'en';
@@ -359,19 +389,35 @@ async function run({ audio, language }: { audio: Float32Array; language: string 
       stage: '转写结果',
     });
 
-    self.postMessage({ 
-      status: 'complete', 
-      result: transcript, 
-      time: end - start 
-    } satisfies ASRProgress);
+    self.postMessage(withPurpose({
+      status: 'complete',
+      result: transcript,
+      time: end - start,
+    }, 'transcribe'));
     
   } catch (error) {
     console.error('ASR识别失败:', error);
-    self.postMessage({
+    self.postMessage(withPurpose({
       status: 'error',
       error: error instanceof Error ? error.message : 'ASR 识别失败',
-    } satisfies ASRProgress);
+    }, 'transcribe'));
   }
+}
+
+/** 将 transformers.js 误导性错误改写成可操作提示 */
+function formatAsrLoadError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : fallback;
+  // pipeline 在 SpeechSeq2Seq 因缺文件失败后会尝试 CTC，最终抛出该误导信息
+  if (message.includes('Unsupported model type: whisper')) {
+    return (
+      '模型文件加载失败：可能是镜像缺少 ONNX 权重，或无法访问 HuggingFace。' +
+      '请检查网络后重试，或更换模型。'
+    );
+  }
+  if (message.includes('Could not locate file')) {
+    return `模型文件缺失：${message}`;
+  }
+  return message || fallback;
 }
 
 // 监听主线程消息

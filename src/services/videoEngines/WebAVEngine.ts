@@ -464,33 +464,49 @@ export class WebAVEngine implements IVideoProcessingEngine {
         this.videoClip.meta.height,
       );
 
-      const subtitleSprite = new OffscreenSprite(
-        new EmbedSubtitlesClip(subtitleStructs, {
-          videoWidth: metrics.videoWidth,
-          videoHeight: metrics.videoHeight,
-          fontSize: metrics.fontSize,
-          fontFamily: metrics.fontFamily,
-          fontWeight: metrics.fontWeight,
-          fontStyle: metrics.fontStyle,
-          color: `${effectiveStyle.color}${Math.round(effectiveStyle.colorOpacity * 255).toString(16).padStart(2, '0')}`,
-          textBgColor: effectiveStyle.backgroundOpacity > 0
-            ? `${effectiveStyle.backgroundColor}${Math.round(effectiveStyle.backgroundOpacity * 255).toString(16).padStart(2, '0')}`
-            : undefined,
-          strokeStyle: metrics.borderWidth > 0 && effectiveStyle.borderOpacity > 0
-            ? `${effectiveStyle.borderColor}${Math.round(effectiveStyle.borderOpacity * 255).toString(16).padStart(2, '0')}`
-            : undefined,
-          lineWidth: metrics.borderWidth,
-          lineJoin: 'round',
-          lineCap: 'round',
-          letterSpacing: metrics.letterSpacing,
-          bottomOffset: metrics.bottomOffset,
-          textShadow: effectiveStyle.shadowBlur > 0 ? {
+      // EmbedSubtitlesClip 内部对 textShadow 无空判断（直接读 textShadow.color）。
+      // 若传入 textShadow: undefined，Object.assign 会覆盖库默认值并在渲染时抛错：
+      // "Cannot read properties of undefined (reading 'color')"。
+      // 无阴影时必须传零值对象，而不能省略/传 undefined（省略会启用库默认 blur=4 阴影）。
+      const textShadow = effectiveStyle.shadowBlur > 0
+        ? {
             offsetX: metrics.shadowOffsetX,
             offsetY: metrics.shadowOffsetY,
             blur: metrics.shadowBlur,
-            color: effectiveStyle.shadowColor,
-          } : undefined,
-        })
+            color: effectiveStyle.shadowColor || '#000000',
+          }
+        : {
+            offsetX: 0,
+            offsetY: 0,
+            blur: 0,
+            color: 'transparent',
+          };
+
+      const embedOptions: ConstructorParameters<typeof EmbedSubtitlesClip>[1] = {
+        videoWidth: metrics.videoWidth,
+        videoHeight: metrics.videoHeight,
+        fontSize: metrics.fontSize,
+        fontFamily: metrics.fontFamily,
+        fontWeight: metrics.fontWeight,
+        fontStyle: metrics.fontStyle,
+        color: `${effectiveStyle.color}${Math.round(effectiveStyle.colorOpacity * 255).toString(16).padStart(2, '0')}`,
+        lineWidth: metrics.borderWidth,
+        lineJoin: 'round',
+        lineCap: 'round',
+        letterSpacing: metrics.letterSpacing,
+        bottomOffset: metrics.bottomOffset,
+        textShadow,
+      };
+
+      if (effectiveStyle.backgroundOpacity > 0) {
+        embedOptions.textBgColor = `${effectiveStyle.backgroundColor}${Math.round(effectiveStyle.backgroundOpacity * 255).toString(16).padStart(2, '0')}`;
+      }
+      if (metrics.borderWidth > 0 && effectiveStyle.borderOpacity > 0) {
+        embedOptions.strokeStyle = `${effectiveStyle.borderColor}${Math.round(effectiveStyle.borderOpacity * 255).toString(16).padStart(2, '0')}`;
+      }
+
+      const subtitleSprite = new OffscreenSprite(
+        new EmbedSubtitlesClip(subtitleStructs, embedOptions)
       );
 
       // 设置字幕时间（覆盖整个视频时长）

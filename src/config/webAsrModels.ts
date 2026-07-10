@@ -39,16 +39,18 @@ export interface WebAsrModel {
   description: string;
 }
 
-// 注意：Whisper 的 modelBaseUrl 已上传至自建 OSS；Moonshine 暂未上传 OSS 镜像，
-// 用户首次下载会直接从 huggingface.co 拉取（国内可能较慢），后续可补传。
+// OSS 镜像现状（需与 asrWorker dtype 策略保持一致）：
+// - whisper-small：已上传 config/tokenizer + encoder_model.onnx(fp32)
+//   + decoder_model_merged_{quantized,q4}.onnx；缺 encoder_model_quantized.onnx
+// - whisper-tiny / whisper-base：尚未上传完整权重，暂不配置 modelBaseUrl，
+//   直接从 HuggingFace 拉取（worker 仍会对已配置镜像做 404→HF 回退）
+// - Moonshine：暂未上传 OSS 镜像
 export const WEB_ASR_MODELS: WebAsrModel[] = [
   {
     id: 'whisper-tiny',
     name: 'Whisper Tiny',
     family: 'whisper',
     modelId: 'onnx-community/whisper-tiny',
-    modelBaseUrl:
-      'https://fly-cut.oss-cn-hangzhou.aliyuncs.com/models/onnx-community/whisper-tiny',
     languages: ['multi'],
     recommended: false,
     tokenTimestampVerified: true,
@@ -60,8 +62,6 @@ export const WEB_ASR_MODELS: WebAsrModel[] = [
     name: 'Whisper Base',
     family: 'whisper',
     modelId: 'onnx-community/whisper-base',
-    modelBaseUrl:
-      'https://fly-cut.oss-cn-hangzhou.aliyuncs.com/models/onnx-community/whisper-base',
     languages: ['multi'],
     recommended: false,
     tokenTimestampVerified: true,
@@ -78,7 +78,8 @@ export const WEB_ASR_MODELS: WebAsrModel[] = [
     languages: ['multi'],
     recommended: true,
     tokenTimestampVerified: true,
-    sizeHint: '~244MB (q8)',
+    // encoder 走 fp32、decoder 走 q8/q4（对齐 OSS 实际文件）
+    sizeHint: '~500MB (encoder fp32 + decoder q8/q4)',
     description: '推荐：多语种支持好，浏览器本地可用，WASM/WebGPU 均可。',
   },
   {

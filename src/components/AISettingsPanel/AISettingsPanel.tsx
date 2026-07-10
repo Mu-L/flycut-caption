@@ -8,6 +8,7 @@ import { useTranslation } from '@/contexts/LocaleProvider'
 import type { AIModelConfig } from '@/types/ai'
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -158,7 +159,7 @@ export function AISettingsPanel() {
             </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-3 py-2">
+          <DialogBody className="space-y-3">
             <div className="space-y-1">
               <Label>{t('components.aiSettings.name')}</Label>
               <Input
@@ -200,9 +201,9 @@ export function AISettingsPanel() {
                 placeholder="0.2"
               />
             </div>
-          </div>
+          </DialogBody>
 
-          <DialogFooter>
+          <DialogFooter className="border-t">
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               {t('components.aiSettings.cancel')}
             </Button>

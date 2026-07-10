@@ -62,8 +62,21 @@ export function useASR(): UseASRReturn {
     });
   }, [setError, t]);
 
+  // 仅在 startASR 会话内把引擎进度写入全局 asrProgress。
+  // 设置面板「仅下载模型」会复用同一 worker 进度通道，不能驱动字幕编辑器的识别加载态。
+  const asrSessionActiveRef = useRef(false);
+
   useEffect(() => {
     const handleProgress = (progress: ASRProgress) => {
+      // 模型预下载：只给 ModelDownloadPanel 用，不更新 ASR UI / 不弹识别失败 toast
+      if (progress.purpose === 'download') {
+        return;
+      }
+
+      if (!asrSessionActiveRef.current) {
+        return;
+      }
+
       setASRProgress(progress);
 
       if (progress.status === 'complete' && progress.result) {
@@ -94,6 +107,7 @@ export function useASR(): UseASRReturn {
 
   const startASR = useCallback(
     async (videoFile: VideoFile) => {
+      asrSessionActiveRef.current = true;
       try {
         setLoading(true);
 
@@ -142,6 +156,7 @@ export function useASR(): UseASRReturn {
         setASRProgress({ status: 'error', error: errorMessage });
       } finally {
         setLoading(false);
+        asrSessionActiveRef.current = false;
       }
     },
     [setLoading, setASRProgress, setVideoFile, reportAsrError, t],

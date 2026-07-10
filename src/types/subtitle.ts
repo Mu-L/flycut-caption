@@ -26,8 +26,13 @@ export interface SubtitleTranscript {
   duration: number;
 }
 
+/** Worker / 引擎进度用途：用于区分「仅下载模型」与真正的识别流程 */
+export type ASRProgressPurpose = 'download' | 'load' | 'transcribe';
+
 export interface ASRProgress {
   status: 'loading' | 'initiate' | 'progress' | 'done' | 'ready' | 'downloaded' | 'loaded' | 'running' | 'complete' | 'error' | 'reset';
+  /** 缺省视为识别相关；download 不应驱动字幕编辑器的 ASR 加载态 */
+  purpose?: ASRProgressPurpose;
   data?: string;
   file?: string;
   progress?: number;

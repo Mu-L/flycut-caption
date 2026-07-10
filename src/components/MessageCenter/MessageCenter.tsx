@@ -80,7 +80,7 @@ export function MessageCenter({ isOpen, onClose }: MessageCenterProps) {
         onClick={(e) => e.stopPropagation()}
       >
         {/* 头部 */}
-        <div className="p-4 border-b flex items-center justify-between">
+        <div className="shrink-0 p-4 border-b flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <Bell className="h-5 w-5 text-primary" />
             <h2 className="text-lg font-semibold">消息中心</h2>
@@ -100,7 +100,7 @@ export function MessageCenter({ isOpen, onClose }: MessageCenterProps) {
         </div>
 
         {/* 搜索和过滤器 */}
-        <div className="p-4 border-b space-y-3">
+        <div className="shrink-0 p-4 border-b space-y-3">
           {/* 搜索框 */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -149,7 +149,7 @@ export function MessageCenter({ isOpen, onClose }: MessageCenterProps) {
 
         {/* 操作按钮 */}
         {messages.length > 0 && (
-          <div className="p-4 border-b flex items-center justify-between">
+          <div className="shrink-0 p-4 border-b flex items-center justify-between">
             <div className="flex items-center space-x-2">
               {unreadCount > 0 && (
                 <button
@@ -173,7 +173,7 @@ export function MessageCenter({ isOpen, onClose }: MessageCenterProps) {
         )}
 
         {/* 消息列表 */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {filteredMessages.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground">
               <Bell className="h-12 w-12 mx-auto mb-4 opacity-50" />

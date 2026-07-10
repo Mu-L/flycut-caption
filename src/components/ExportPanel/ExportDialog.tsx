@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { 
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -239,7 +240,7 @@ export function ExportDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="py-4">
+        <DialogBody>
           {exportType === 'subtitles' ? (
             <div className="space-y-4">
               {renderExportContentSelector()}
@@ -483,10 +484,10 @@ export function ExportDialog({
               </div>
             </div>
           )}
-        </div>
+        </DialogBody>
 
         {exportType === 'video' && (
-          <DialogFooter>
+          <DialogFooter className="border-t">
             <button
               onClick={() => onOpenChange(false)}
               className="px-4 py-2 text-sm border rounded-md hover:bg-muted/50 transition-colors"

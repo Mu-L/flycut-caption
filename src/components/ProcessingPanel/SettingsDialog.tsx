@@ -3,6 +3,7 @@
 import { ModelDownloadPanel } from '@/components/ASR/ModelDownloadPanel';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -24,15 +25,15 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85vh] max-w-lg flex-col gap-0 overflow-hidden p-0">
-        <DialogHeader className="shrink-0 border-b border-aimu-border px-6 py-4 pr-12">
+      <DialogContent className="max-w-lg">
+        <DialogHeader className="border-b border-aimu-border">
           <DialogTitle className="flex items-center space-x-2">
             <Package className="h-5 w-5" />
             <span>{t('components.workstation.tools')}</span>
           </DialogTitle>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+        <DialogBody>
           <ModelDownloadPanel />
 
           {/* 智能剪切空白段阈值 */}
@@ -61,7 +62,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               />
             </div>
           </div>
-        </div>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );

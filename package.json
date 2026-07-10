@@ -42,7 +42,7 @@
   "homepage": "https://github.com/x007xyz/flycut-caption",
   "repository": {
     "type": "git",
-    "url": "https://github.com/x007xyz/flycut-caption.git"
+    "url": "git+https://github.com/x007xyz/flycut-caption.git"
   },
   "bugs": {
     "url": "https://github.com/x007xyz/flycut-caption/issues"

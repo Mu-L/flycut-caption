@@ -1,7 +1,7 @@
 {
   "name": "@flycut/caption-react",
   "private": false,
-  "version": "1.1.0",
+  "version": "2.0.0",
   "type": "module",
   "description": "FlyCut Caption - AI-powered video subtitle editing React component with complete editing suite",
   "main": "dist/index.js",

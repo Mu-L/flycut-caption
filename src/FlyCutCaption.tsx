@@ -60,8 +60,9 @@ import type { VideoFile, VideoSegment, VideoProcessingProgress } from '@/types/v
 import type { VideoProcessingOptions, VideoEngineType } from '@/types/videoEngine';
 import type { FlyCutCaptionProps } from './types';
 import { defaultConfig } from './types';
-// 示例视频：Vite 返回打包后的 URL
-import demoVideoUrl from '@/assets/demo.mp4';
+// 示例视频：云端托管（本地 src/assets/demo.mp4 仅保留给集成测试）
+const SAMPLE_VIDEO_URL = 'https://fly-cut.oss-cn-hangzhou.aliyuncs.com/demo/sample-video.mp4';
+const SAMPLE_VIDEO_NAME = 'sample-video.mp4';
 
 type AimuTab = 'style' | 'tools' | 'options' | 'api';
 
@@ -1105,10 +1106,10 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
     setSampleLoadProgress(MEDIA_LOAD_PHASE.START);
 
     try {
-      const { blob } = await fetchBlobWithProgress(demoVideoUrl, (loaded, total) => {
+      const { blob } = await fetchBlobWithProgress(SAMPLE_VIDEO_URL, (loaded, total) => {
         setSampleLoadProgress(calcDownloadProgress(loaded, total));
       });
-      const file = new File([blob], 'demo.mp4', { type: 'video/mp4' });
+      const file = new File([blob], SAMPLE_VIDEO_NAME, { type: 'video/mp4' });
       const objectUrl = URL.createObjectURL(file);
 
       setSampleLoadProgress(MEDIA_LOAD_PHASE.METADATA);
@@ -1126,7 +1127,7 @@ function FlyCutCaptionContent(props: FlyCutCaptionProps) {
         url: objectUrl,
         size: blob.size,
         type: 'video/mp4',
-        name: 'demo.mp4',
+        name: SAMPLE_VIDEO_NAME,
         duration,
       };
       useAppStore.getState().setVideoFile(sampleVideoFile);

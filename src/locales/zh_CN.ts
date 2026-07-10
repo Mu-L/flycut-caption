@@ -228,7 +228,7 @@ const zhCN: FlyCutCaptionLocale = {
       mockPreview: '模拟预览',
       mockSubtitlePrimary: '底部波形用来快速定位声音峰值和空白区间',
       mockSubtitleSecondary: 'The waveform below helps locate peaks and silent gaps quickly.',
-      mockFileName: 'whisper-timestamps-demo.mp4',
+      mockFileName: 'sample-video.mp4',
       dropFile: '拖入视频或音频',
       supportedFormatsShort: 'MP4、WebM、MOV、MP3、WAV、OGG',
       orDivider: '或',

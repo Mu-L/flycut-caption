@@ -2,9 +2,9 @@
 
 <div align="center">
 
-![FlyCut Caption](screenshots/complete-subtitle-editing-interface.png)
+![FlyCut Caption dual-subtitle editor](screenshots/hero-editor.gif)
 
-A powerful AI-driven video subtitle editing tool focused on intelligent subtitle generation, editing, and video clipping.
+A powerful AI-driven video subtitle editing tool focused on intelligent subtitle generation, bilingual editing, smart blank cutting, and hard-burn export.
 
 [English](README.md) | [中文](README.zh.md)
 
@@ -13,18 +13,20 @@ A powerful AI-driven video subtitle editing tool focused on intelligent subtitle
 ## ✨ Features
 
 ### 🎯 Core Features
-- **🎤 Intelligent Speech Recognition**: High-precision speech-to-text based on Whisper model, supporting multiple languages
-- **✂️ Visual Subtitle Editing**: Intuitive subtitle segment selection and deletion interface
-- **🎬 Real-time Video Preview**: Video player synchronized with subtitles, supporting interval playback
-- **📤 Multi-format Export**: Support for SRT, JSON subtitle formats and video file export
-- **🎨 Subtitle Style Customization**: Custom subtitle fonts, colors, positions and other styles
-- **🌐 Internationalization Support**: Componentized internationalization design, supporting Chinese, English, and custom language packs (such as Japanese examples)
+- **🎤 Intelligent Speech Recognition**: High-precision ASR with Whisper (browser) and FunASR (desktop/Tauri), word-level timestamps
+- **🌐 Bilingual Subtitles**: Primary + secondary tracks, AI translation (e.g. Chinese ↔ English), dual-track editing
+- **✂️ Visual Subtitle Editing**: Select, delete, restore segments; word-level mark/delete modes
+- **⚡ Smart Cut Blank**: One-click detect and remove silent gaps to tighten the cut
+- **🎬 Real-time Preview**: Player synced with timeline; preview mode skips deleted segments
+- **🎨 Subtitle Style Customization**: Fonts, colors, presets, dual-track layout
+- **📤 Multi-format Export**: SRT / JSON subtitles, clip-only video, or hard-burn dual subtitles into the video
+- **🧪 Sample Video**: One-click load a cloud sample to try the full pipeline
 
 ### 🔧 Technical Features
-- **⚡ Modern Tech Stack**: React 19 + TypeScript + Vite + Tailwind CSS
-- **🧠 Local AI Processing**: Using Hugging Face Transformers.js to run AI models locally in the browser
-- **🎯 Web Workers**: ASR processing runs in background threads without blocking the main interface
-- **📱 Responsive Design**: Modern interface adapted to different screen sizes
+- **⚡ Modern Tech Stack**: React 19 + TypeScript + Vite + Tailwind CSS 4 + Tauri
+- **🧠 Local AI Processing**: Browser models via Transformers.js; desktop FunASR sidecar for higher quality
+- **🎯 Web Workers / Sidecars**: ASR and encoding stay off the UI thread
+- **📱 Responsive Design**: Modern workstation UI adapted to different screen sizes
 - **🎪 Component Architecture**: Modular design, easy to maintain and extend
 
 ## 🚀 Quick Start
@@ -70,30 +72,33 @@ pnpm preview
 ### 1. Upload Video Files
 - Supported formats: MP4, WebM, AVI, MOV
 - Supported audio: MP3, WAV, OGG
-- Drag and drop files to upload area or click to select files
+- Drag and drop files, pick a local file, or click **Use sample video** to try instantly
 
-![File Upload Interface](screenshots/flycut-caption-main-interface.png)
-
-After uploading, enter the ASR configuration interface:
-
-![ASR Setup Interface](screenshots/asr-setup-interface.png)
+![File Upload / Load Sample Video](screenshots/file-upload.gif)
 
 ### 2. Generate Subtitles
-- Select recognition language (supports Chinese, English and other languages)
-- Click start recognition, AI will automatically generate timestamped subtitles
-- Recognition process runs in background without affecting interface operations
+- Choose ASR engine / model and recognition language
+- Click start recognition; AI generates timestamped subtitles in the background
+- Desktop builds can use FunASR for higher accuracy on longer clips
 
-![ASR Processing Interface](screenshots/asr-processing-interface.png)
+![ASR Processing](screenshots/asr-processing.gif)
 
-### 3. Edit Subtitles
-- **Select segments**: Choose subtitle segments to delete from the list
-- **Batch operations**: Support select all, batch delete, undo delete operations
-- **Real-time preview**: Click subtitle segments to jump to corresponding time points
-- **History records**: Support undo/redo operations
+### 3. Edit Subtitles & Translate
+- **Dual tracks**: Primary + secondary (bilingual) list and timeline
+- **AI translation**: Translate the full track (e.g. Deepseek → English)
+- **Select / delete**: Segment-level or word-level mark & remove
+- **History**: Undo / redo supported
 
-![Subtitle Editing Interface](screenshots/complete-subtitle-editing-interface.png)
+![Subtitle Editing Interface](screenshots/hero-editor.gif)
 
-### 4. Video Preview
+### 4. Smart Cut Blank
+- Click **Smart Cut Blank** to detect long silences and mark them for removal
+- Timeline shows kept (green) vs removed (red) regions
+- Preview mode plays only kept segments so you can judge the cut before export
+
+![Smart Cut Blank](screenshots/smart-cut-blank.gif)
+
+### 5. Video Preview
 - **Preview mode**: Automatically skip deleted segments to preview final result
 - **Keyboard shortcuts**:
   - `Space`: Play/Pause
@@ -103,19 +108,20 @@ After uploading, enter the ASR configuration interface:
   - `M`: Mute/Unmute
   - `F`: Fullscreen
 
-### 5. Subtitle Styling
-- **Font settings**: Font size, weight, color
-- **Position adjustment**: Subtitle display position, alignment
+### 6. Subtitle Styling
+- **Font settings**: Font size, weight, color, presets
+- **Dual layout**: Primary / secondary track styles independently
 - **Background style**: Background color, transparency, border
-- **Real-time preview**: WYSIWYG style adjustment
+- **Real-time preview**: WYSIWYG style adjustment on the player
 
-### 6. Export Results
-- **Subtitle export**: SRT format (universal subtitle format), JSON format
+### 7. Export Results
+- **Subtitle export**: SRT, JSON, and other subtitle formats
 - **Video export**:
-  - Keep only non-deleted segments
-  - Option to burn subtitles into video
-  - Support different quality settings
-  - Multiple format outputs
+  - Keep only non-deleted segments (smart cut applied)
+  - Optional hard-burn of dual subtitles into the video
+  - Hardware-accelerated encode on desktop when available
+
+![Export with dual burned subtitles](screenshots/export-result.gif)
 
 ## 🌐 Internationalization Design
 

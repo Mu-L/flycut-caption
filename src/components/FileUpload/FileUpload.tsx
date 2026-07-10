@@ -173,7 +173,7 @@ export function FileUpload({ className, onFileSelect }: FileUploadProps) {
     setLoadProgress(MEDIA_LOAD_PHASE.START);
 
     try {
-      const demoUrl = "https://fly-cut.oss-cn-hangzhou.aliyuncs.com/demo/whisper-timestamps-demo.mp4";
+      const demoUrl = "https://fly-cut.oss-cn-hangzhou.aliyuncs.com/demo/sample-video.mp4";
 
       const { blob } = await fetchBlobWithProgress(demoUrl, (loaded, total) => {
         setLoadProgress(calcDownloadProgress(loaded, total));
@@ -184,11 +184,11 @@ export function FileUpload({ className, onFileSelect }: FileUploadProps) {
       // 创建 File 对象，兼容性处理
       let file: File;
       try {
-        file = new window.File([blob], 'whisper-timestamps-demo.mp4', { type: 'video/mp4' });
+        file = new window.File([blob], 'sample-video.mp4', { type: 'video/mp4' });
       } catch {
         // 如果 File 构造函数不可用，使用 Blob 并添加必要属性
         const fileBlob = blob as Blob & { name: string; lastModified: number };
-        fileBlob.name = 'whisper-timestamps-demo.mp4';
+        fileBlob.name = 'sample-video.mp4';
         fileBlob.lastModified = Date.now();
         file = fileBlob as File;
       }
